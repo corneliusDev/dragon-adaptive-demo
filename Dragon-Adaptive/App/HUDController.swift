@@ -12,6 +12,11 @@ import Foundation
 import Combine
 import SwiftUI
 
+enum VitalsMode {
+    case manual      // motion slider; HR estimated from motion
+    case synthetic   // SyntheticVitalsSource stands in for the Apple Watch
+}
+
 final class HUDController: ObservableObject {
     @Published var connection: ConnectionState = .idle
     @Published var frame = HUDFrame()
@@ -26,11 +31,19 @@ final class HUDController: ObservableObject {
     @Published var bandLabel = "STATIONARY"
     @Published var attnLabel = "○ IDLE"
     @Published var ctxLabel = "—"
+    @Published var vitalsMode: VitalsMode = .synthetic
+    @Published var vitalsLabel = "—"
 
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
     private let session = GlassesSession()
     private let sim = SimulatedAttentionSource()
     private let motionSource = MotionSource()
+    private let synthetic = SyntheticVitalsSource()
+
+    // HR older than this is treated as missing and the engine falls back to its estimate.
+    private let hrStaleAfter: TimeInterval = 5
+    private var lastHR: Double?
+    private var lastHRAt = Date.distantPast
 
     private var gesture: GestureAttentionSource?
     private var backend: GlassesBackend?
@@ -49,6 +62,10 @@ final class HUDController: ObservableObject {
             self?.backend?.invalidate()
         }
         sim.start()
+
+        synthetic.onSample = { [weak self] sample in
+            self?.receive(sample)
+        }
 
         engine.onFlywheel = { [weak self] n in
             DispatchQueue.main.async {
@@ -102,6 +119,7 @@ final class HUDController: ObservableObject {
     deinit {
         print("[HUDController] deinit")
         timer?.invalidate()
+        synthetic.stop()
         motionSource.stop()
         gesture?.stop()
         session.disconnect()
@@ -143,6 +161,7 @@ final class HUDController: ObservableObject {
     func toggleRun() {
         running.toggle()
         engine.running = running
+        syncSynthetic()
         backend?.invalidate()
         print("[HUDController] running: \(running)")
     }
@@ -152,7 +171,7 @@ final class HUDController: ObservableObject {
 
         engine.reset()
         running = false
-        motion = 0
+        resetVitals()
 
         backend?.invalidate()
         pushImmediateFrame()
@@ -165,10 +184,56 @@ final class HUDController: ObservableObject {
         engine.setScenario(key == "sof" ? Scenarios.operatorSOF : Scenarios.cyclingTri)
 
         running = false
-        motion = 0
+        resetVitals()
 
         backend?.invalidate()
         pushImmediateFrame()
+    }
+
+    func setVitalsMode(_ mode: VitalsMode) {
+        print("[HUDController] vitals mode: \(mode)")
+
+        vitalsMode = mode
+        resetVitals()
+        syncSynthetic()
+        pushImmediateFrame()
+    }
+
+    // MARK: - Vitals
+
+    private func receive(_ sample: VitalsSample) {
+        if let m = sample.motion {
+            motion = m
+        }
+
+        if let hr = sample.heartRate {
+            lastHR = hr
+            lastHRAt = sample.timestamp
+        }
+    }
+
+    /// The synthetic watch streams only while the scenario is playing.
+    private func syncSynthetic() {
+        if vitalsMode == .synthetic && running {
+            synthetic.start()
+        } else {
+            synthetic.stop()
+        }
+    }
+
+    private func resetVitals() {
+        synthetic.stop()
+        synthetic.reset()
+        lastHR = nil
+        lastHRAt = .distantPast
+        motion = 0
+    }
+
+    private var freshHeartRate: Int? {
+        guard let hr = lastHR, Date().timeIntervalSince(lastHRAt) < hrStaleAfter else {
+            return nil
+        }
+        return Int(hr)
     }
 
     // MARK: - Loop
@@ -188,31 +253,18 @@ final class HUDController: ObservableObject {
     }
 
     private func tick() {
-        if running {
-            autoMotion()
-        }
-
-        engine.motion = motionSource.value
-
-        let nextFrame = engine.tick(dt: 1.0 / 20.0)
-
-        DispatchQueue.main.async {
-            self.frame = nextFrame
-            self.bandLabel = self.engine.band.label
-            self.attnLabel = self.attnTag
-            self.ctxLabel = self.engine.active.map {
-                "\($0.tag) · \($0.line1)"
-            } ?? (self.engine.band == .stationary ? "dashboard" : "ambient only")
-        }
-
-        if !showCalibrationOnConnect {
-            backend?.apply(nextFrame)
-        }
+        step(dt: 1.0 / 20.0)
     }
 
     private func pushImmediateFrame() {
+        step(dt: 0)
+    }
+
+    private func step(dt: Double) {
         engine.motion = motionSource.value
-        let nextFrame = engine.tick(dt: 0)
+        engine.measuredHeartRate = freshHeartRate
+
+        let nextFrame = engine.tick(dt: dt)
 
         DispatchQueue.main.async {
             self.frame = nextFrame
@@ -221,6 +273,7 @@ final class HUDController: ObservableObject {
             self.ctxLabel = self.engine.active.map {
                 "\($0.tag) · \($0.line1)"
             } ?? (self.engine.band == .stationary ? "dashboard" : "ambient only")
+            self.vitalsLabel = self.vitalsTag
         }
 
         if !showCalibrationOnConnect {
@@ -239,19 +292,8 @@ final class HUDController: ObservableObject {
         }
     }
 
-    private func autoMotion() {
-        let t = engine.clock
-
-        var m = 30 + 28 * sin(t / 3.2) + 18 * sin(t / 1.3)
-
-        if t > 12 && t < 20 {
-            m += 30
-        }
-
-        if t > 30 && t < 38 {
-            m += 20
-        }
-
-        motion = max(0, min(100, m))
+    private var vitalsTag: String {
+        let hr = engine.measuredHeartRate.map { "HR \($0)" } ?? "HR \(engine.heartRate) est"
+        return "\(hr) · MOT \(Int(motion))"
     }
 }

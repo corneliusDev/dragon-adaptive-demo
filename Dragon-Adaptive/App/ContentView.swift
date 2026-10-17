@@ -46,7 +46,21 @@ struct ContentView: View {
                 Text(hud.bandLabel).font(.system(size: 10, design: .monospaced)).foregroundColor(amber)
             }
             Slider(value: $hud.motion, in: 0...100).accentColor(amber)
+                .disabled(hud.vitalsMode == .synthetic)
+            HStack(spacing: 10) {
+                Text("SOURCE").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                sourceSeg("SLIDER", .manual); sourceSeg("SYNTHETIC WATCH", .synthetic)
+            }
         }
+    }
+
+    private func sourceSeg(_ title: String, _ mode: VitalsMode) -> some View {
+        Button(title) { hud.setVitalsMode(mode) }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(hud.vitalsMode == mode ? phos : .gray)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 7).fill(hud.vitalsMode == mode ? Color(white: 0.14) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
     }
 
     private var scenarioControls: some View {
@@ -91,6 +105,8 @@ struct ContentView: View {
 
     private var telemetry: some View {
         VStack(spacing: 0) {
+            row("VITALS", hud.vitalsLabel, amber)
+            Divider().background(Color(white: 0.15))
             row("ATTENTION", hud.attnLabel, amber)
             Divider().background(Color(white: 0.15))
             row("CONTEXT", hud.ctxLabel, phos)

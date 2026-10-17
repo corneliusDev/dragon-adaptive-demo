@@ -15,7 +15,12 @@ enum MotionBand: Int {
 final class AdaptiveEngine {
     private(set) var scenario: Scenario
     var motion: Double = 0
-    var heartRate: Int { Int(96 + motion * 0.92) }
+
+    /// Latest real HR reading, or nil when none is fresh.
+    var measuredHeartRate: Int?
+
+    /// Falls back to an estimate from motion when no reading is available.
+    var heartRate: Int { measuredHeartRate ?? Int(96 + motion * 0.92) }
 
     private(set) var attention: AttentionEvent = .idle
     private var attnUntil = Date.distantPast
