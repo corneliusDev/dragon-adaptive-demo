@@ -108,8 +108,12 @@ final class SyntheticRunTests: XCTestCase {
         XCTAssertGreaterThan(n, 6_000)
         let normal = Double(normalErrors.count)
         XCTAssertGreaterThanOrEqual(normal / n, 0.95, "spikes are occasional")
-        // Error magnitude of normal fixes sits inside the configured 3–8 m (both bounds).
         let tolerance = 1e-6
+        // Acceptance: across every fix (spikes included), >= 95% of position errors
+        // sit inside the configured 3–8 m range.
+        let allInRange = errors.filter { range.lowerBound - tolerance <= $0 && $0 <= range.upperBound + tolerance }
+        XCTAssertGreaterThanOrEqual(Double(allInRange.count) / n, 0.95)
+        // Error magnitude of normal fixes sits inside the configured 3–8 m (both bounds).
         let inRange = normalErrors.filter { $0 >= range.lowerBound - tolerance && $0 <= range.upperBound + tolerance }
         XCTAssertGreaterThanOrEqual(Double(inRange.count) / normal, 0.95)
         XCTAssertGreaterThanOrEqual(Double(accuracies.filter { range.contains($0) }.count) / n, 0.95)
