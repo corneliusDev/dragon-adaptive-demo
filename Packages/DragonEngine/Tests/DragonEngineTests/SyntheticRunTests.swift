@@ -87,12 +87,17 @@ final class SyntheticRunTests: XCTestCase {
     func testPositionNoiseStaysInTheConfiguredRange() {
         var run = SyntheticRun(profile: .onPlan, seed: 3)
         var errors: [Double] = [], accuracies: [Double] = []
+        var normalErrors: [Double] = [], normalCovered = 0
 
         func check(_ events: [RunEvent]) {
             for case .location(let fix) in events {
                 let truth = run.truePosition
                 errors.append(Course.haversine(fix.latitude, fix.longitude, truth.latitude, truth.longitude))
                 accuracies.append(fix.horizontalAccuracy)
+                if fix.horizontalAccuracy <= run.gps.accuracy.upperBound {   // not a spike
+                    normalErrors.append(errors.last!)
+                    if errors.last! <= fix.horizontalAccuracy + 1e-6 { normalCovered += 1 }
+                }
             }
         }
         check(run.advance(by: 0))
@@ -101,9 +106,19 @@ final class SyntheticRunTests: XCTestCase {
         let range = run.gps.accuracy
         let n = Double(errors.count)
         XCTAssertGreaterThan(n, 6_000)
-        XCTAssertGreaterThanOrEqual(Double(errors.filter { $0 <= range.upperBound }.count) / n, 0.95)
+        let normal = Double(normalErrors.count)
+        XCTAssertGreaterThanOrEqual(normal / n, 0.95, "spikes are occasional")
+        // Error magnitude of normal fixes sits inside the configured 3–8 m (both bounds).
+        let tolerance = 1e-6
+        let inRange = normalErrors.filter { $0 >= range.lowerBound - tolerance && $0 <= range.upperBound + tolerance }
+        XCTAssertGreaterThanOrEqual(Double(inRange.count) / normal, 0.95)
         XCTAssertGreaterThanOrEqual(Double(accuracies.filter { range.contains($0) }.count) / n, 0.95)
-        XCTAssertGreaterThan(errors.sorted()[errors.count / 2], 1.5, "there is real noise")
+        // Reported accuracy is a ~95% radius: it covers the true error.
+        XCTAssertGreaterThanOrEqual(Double(normalCovered) / normal, 0.95)
+        // The error really spreads across the range rather than sitting at one value.
+        let sorted = normalErrors.sorted()
+        XCTAssertLessThan(sorted[sorted.count / 10], 4.5)
+        XCTAssertGreaterThan(sorted[sorted.count * 9 / 10], 6.5)
         XCTAssertTrue(accuracies.contains { $0 >= 25 }, "occasional accuracy spikes toward 30 m")
         XCTAssertLessThanOrEqual(accuracies.max() ?? 0, run.gps.spikeAccuracy)
     }

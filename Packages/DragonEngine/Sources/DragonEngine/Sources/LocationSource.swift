@@ -9,7 +9,7 @@ public struct LocationSample: Sendable, Equatable, Codable {
     public let t: TimeInterval              // run time (seconds) when the fix was taken
     public let latitude: Double
     public let longitude: Double
-    public let horizontalAccuracy: Double   // metres, ~68% confidence radius as CoreLocation reports it
+    public let horizontalAccuracy: Double   // metres; the true position is within this radius for ~95% of fixes
     public let speed: Double?               // m/s from the receiver (Doppler), nil when unknown
     public let altitude: Double?            // metres, nil when unknown
 

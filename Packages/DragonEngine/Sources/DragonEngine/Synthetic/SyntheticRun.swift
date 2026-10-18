@@ -32,7 +32,8 @@ public struct SyntheticRun {
 
     /// How the phone's GPS behaves.
     public struct GPS: Sendable, Equatable {
-        /// Reported accuracy and typical error, metres, wandering within this range.
+        /// Position error, metres: each normal fix is off by a distance in this range
+        /// (wandering, correlated over ~10 s) and reports an accuracy that covers it.
         public var accuracy: ClosedRange<Double> = 3...8
         /// Accuracy during an occasional bad patch (tree cover, buildings).
         public var spikeAccuracy: Double = 30
@@ -46,8 +47,9 @@ public struct SyntheticRun {
     }
 
     public static let stepsPerSecond = 20
-    /// Error ≈ accuracy / this (2D Gaussian), so ~95% of fixes land within the reported accuracy.
-    static let accuracyToSigma = 2.5
+    /// Spike error is a 2D Gaussian with per-axis sigma = accuracy / this, so ~95% of
+    /// spike fixes land within the reported accuracy (sqrt(-2 ln 0.05) ≈ 2.45).
+    static let accuracyToSigma = 2.45
 
     public let profile: SyntheticProfile
     public let plan: RunPlan
@@ -75,8 +77,10 @@ public struct SyntheticRun {
 
     // Slow state, updated once a second.
     private var wobble = 0.0                    // fractional pace wobble
-    private var accuracy: Double
-    private var errorEast = 0.0, errorNorth = 0.0, errorUp = 0.0
+    private var errorRadius: Double             // metres off, within gps.accuracy
+    private var errorBearing: Double            // radians, direction of the error
+    private var accuracy: Double                // reported; >= errorRadius
+    private var errorUp = 0.0
     private var spikeUntil = -1.0
     private var dropoutUntil = -1.0
     private var scriptedOutage: (at: Double, duration: TimeInterval)?
@@ -99,7 +103,9 @@ public struct SyntheticRun {
                                                maxHR: athlete.maxHR,
                                                hrTimeConstant: athlete.hrTimeConstant,
                                                startHR: athlete.startHR)
-        self.accuracy = (gps.accuracy.lowerBound + gps.accuracy.upperBound) / 2
+        self.errorRadius = rng.uniform(gps.accuracy)
+        self.errorBearing = rng.uniform(0...(2 * .pi))
+        self.accuracy = min(errorRadius * 1.1, gps.accuracy.upperBound)
         self.scriptedOutage = profile.gpsOutage
     }
 
@@ -200,14 +206,20 @@ public struct SyntheticRun {
         let keepWobble = exp(-1.0 / 30)
         wobble = wobble * keepWobble + (1 - keepWobble * keepWobble).squareRoot() * 0.005 * rng.gaussian()
 
-        accuracy = min(max(accuracy + rng.gaussian() * 0.3, gps.accuracy.lowerBound), gps.accuracy.upperBound)
-
-        // Position error: correlated over ~10 s, like a real receiver.
+        // Position error: a distance inside gps.accuracy in a slowly turning direction,
+        // both correlated over ~10 s like a real receiver. The radius mean-reverts to the
+        // middle of the range (sd ≈ a quarter of its width) and is held inside it.
         let keep = exp(-1.0 / 10)
-        let fresh = (1 - keep * keep).squareRoot() * accuracy / SyntheticRun.accuracyToSigma
-        errorEast = errorEast * keep + fresh * rng.gaussian()
-        errorNorth = errorNorth * keep + fresh * rng.gaussian()
+        let range = gps.accuracy
+        let mid = (range.lowerBound + range.upperBound) / 2
+        let spread = (range.upperBound - range.lowerBound) / 4
+        errorRadius = mid + (errorRadius - mid) * keep + (1 - keep * keep).squareRoot() * spread * rng.gaussian()
+        errorRadius = min(max(errorRadius, range.lowerBound), range.upperBound)
+        errorBearing += 0.3 * rng.gaussian()
         errorUp = errorUp * keep + (1 - keep * keep).squareRoot() * 3 * rng.gaussian()
+
+        // Reported accuracy covers the true error, with a little slack.
+        accuracy = min(errorRadius * rng.uniform(1.0...1.25), range.upperBound)
 
         if time >= spikeUntil, rng.chance(gps.spikesPerHour / 3600) {
             spikeUntil = time + rng.uniform(gps.spikeDuration)
@@ -224,7 +236,7 @@ public struct SyntheticRun {
     private var gpsSilent: Bool { time < dropoutUntil }
 
     private mutating func fix(speed: Double? = nil) -> LocationSample {
-        var east = errorEast, north = errorNorth
+        var east = errorRadius * sin(errorBearing), north = errorRadius * cos(errorBearing)
         var reported = accuracy
         if time < spikeUntil {
             let sigma = gps.spikeAccuracy / SyntheticRun.accuracyToSigma
