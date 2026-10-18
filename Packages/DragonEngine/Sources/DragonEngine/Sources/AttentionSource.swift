@@ -5,7 +5,7 @@
 
 import Foundation
 
-public enum AttentionEvent { case glance, dwell, idle }
+public enum AttentionEvent: String, Sendable, Codable { case glance, dwell, idle }
 
 public protocol AttentionSource: AnyObject {
     var onEvent: ((AttentionEvent) -> Void)? { get set }

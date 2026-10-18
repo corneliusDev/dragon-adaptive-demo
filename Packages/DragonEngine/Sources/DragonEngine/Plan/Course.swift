@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct CoursePoint: Sendable, Equatable {
+public struct CoursePoint: Sendable, Equatable, Codable {
     public var latitude: Double
     public var longitude: Double
     /// Metres along the route from the first point.
@@ -16,7 +16,7 @@ public struct CoursePoint: Sendable, Equatable {
     public var elevation: Double?
 }
 
-public struct Waypoint: Sendable, Equatable {
+public struct Waypoint: Sendable, Equatable, Codable {
     public var name: String
     public var latitude: Double
     public var longitude: Double
@@ -50,7 +50,9 @@ public struct CourseLocation: Sendable, Equatable {
     public var offCourse: Bool
 }
 
-public struct Course: Sendable {
+/// Codable as its processed points (not the raw track), so a decoded course
+/// is identical to the one that was encoded.
+public struct Course: Sendable, Equatable, Codable {
     public static let earthRadius = 6_371_000.0
     /// Half-width of the distance window used to smooth elevation.
     public static let elevationSmoothingRadius = 25.0

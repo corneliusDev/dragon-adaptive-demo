@@ -5,7 +5,7 @@
 
 import Foundation
 
-public struct VitalsSample {
+public struct VitalsSample: Sendable, Equatable, Codable {
     public let timestamp: TimeInterval   // source run time (seconds) when the sample was taken
     public let heartRate: Double?        // bpm; nil when this sample carries no HR reading
     public let motion: Double?           // 0–100 exertion; nil when this sample carries no motion reading

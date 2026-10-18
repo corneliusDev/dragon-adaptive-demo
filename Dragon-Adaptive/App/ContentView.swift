@@ -53,12 +53,55 @@ struct ContentView: View {
                 Text(hud.bandLabel).font(.system(size: 10, design: .monospaced)).foregroundColor(amber)
             }
             Slider(value: $hud.motion, in: 0...100).accentColor(amber)
-                .disabled(hud.vitalsMode == .synthetic)
+                .disabled(hud.vitalsMode != .manual)
             HStack(spacing: 10) {
                 Text("SOURCE").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
-                sourceSeg("SLIDER", .manual); sourceSeg("SYNTHETIC WATCH", .synthetic)
+                sourceSeg("SLIDER", .manual); sourceSeg("WATCH", .synthetic); sourceSeg("RACE", .race)
+            }
+            if hud.vitalsMode == .race {
+                raceControls
             }
         }
+    }
+
+    /// Synthetic race: pick a profile and speed, play it, watch distance and HR advance.
+    private var raceControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("SYNTHETIC RACE").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                Spacer()
+                Menu {
+                    ForEach(SyntheticProfile.all, id: \.name) { profile in
+                        Button(profile.displayName) { hud.setRaceProfile(profile) }
+                    }
+                } label: {
+                    Text(hud.raceProfile.displayName).font(.system(size: 11, design: .monospaced)).foregroundColor(phos)
+                }
+            }
+            HStack(spacing: 10) {
+                speedSeg("1×", 1); speedSeg("10×", 10)
+                Spacer()
+                Button(hud.racePlaying ? "⏸" : "▶") { hud.toggleRace() }
+                    .font(.system(size: 13, design: .monospaced)).foregroundColor(hud.racePlaying ? amber : .white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.22)))
+                Button("↻") { hud.resetRace() }
+                    .font(.system(size: 13, design: .monospaced)).foregroundColor(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.22)))
+            }
+            Text(hud.raceLabel).font(.system(size: 12, design: .monospaced)).foregroundColor(amber)
+        }
+        .padding(.top, 4)
+    }
+
+    private func speedSeg(_ title: String, _ speed: Double) -> some View {
+        Button(title) { hud.setRaceSpeed(speed) }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(hud.raceSpeed == speed ? phos : .gray)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 7).fill(hud.raceSpeed == speed ? Color(white: 0.14) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
     }
 
     private func sourceSeg(_ title: String, _ mode: VitalsMode) -> some View {

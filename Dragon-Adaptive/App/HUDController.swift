@@ -19,6 +19,7 @@ import DragonEngine
 enum VitalsMode {
     case manual      // motion slider; HR estimated from motion
     case synthetic   // SyntheticVitalsSource stands in for the Apple Watch
+    case race        // SyntheticRaceSource: a whole race, GPS + watch
 }
 
 final class HUDController: ObservableObject {
@@ -38,11 +39,24 @@ final class HUDController: ObservableObject {
     @Published var vitalsMode: VitalsMode = .synthetic
     @Published var vitalsLabel = "—"
 
+    // Synthetic race
+    @Published var raceProfile: SyntheticProfile = .designWalkthrough
+    @Published var raceSpeed: Double = 1
+    @Published var racePlaying = false
+    @Published var raceLabel = "—"
+
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
     private let session = GlassesSession()
     private let sim = SimulatedAttentionSource()
     private let motionSource = MotionSource()
     private let synthetic = SyntheticVitalsSource()
+    private let race = SyntheticRaceSource()
+
+    // Race state, from what the race's GPS and watch sent (race run time).
+    private var raceDistance: Double?           // metres along the course
+    private var raceLastFix: LocationSample?
+    private var raceHR: Double?
+    private var raceTime: TimeInterval = 0
 
     // HR older than this is treated as missing and the engine falls back to its estimate.
     private let hrStaleAfter: TimeInterval = 5
@@ -74,6 +88,16 @@ final class HUDController: ObservableObject {
 
         synthetic.onSample = { [weak self] sample in
             self?.receive(sample)
+        }
+
+        race.onVitals = { [weak self] sample in
+            guard let self = self else { return }
+            self.receive(sample)
+            self.raceTime = max(self.raceTime, sample.timestamp)
+            if let hr = sample.heartRate { self.raceHR = hr }
+        }
+        race.onSample = { [weak self] fix in
+            self?.receive(fix)
         }
 
         engine.onFlywheel = { [weak self] n in
@@ -130,6 +154,7 @@ final class HUDController: ObservableObject {
         print("[HUDController] deinit")
         timer?.invalidate()
         synthetic.stop()
+        race.stop()
         motionSource.stop()
         gesture?.stop()
         session.disconnect()
@@ -209,6 +234,65 @@ final class HUDController: ObservableObject {
         pushImmediateFrame()
     }
 
+    // MARK: - Synthetic race
+
+    func setRaceProfile(_ profile: SyntheticProfile) {
+        print("[HUDController] race profile: \(profile.name)")
+        raceProfile = profile
+        resetRace()
+    }
+
+    func setRaceSpeed(_ speed: Double) {
+        raceSpeed = speed
+        race.speed = speed
+    }
+
+    func toggleRace() {
+        if race.isStreaming {
+            race.stop()
+        } else {
+            if race.run.isFinished { resetRace() }
+            if vitalsMode != .race { setVitalsMode(.race) }
+            race.speed = raceSpeed
+            race.start()
+        }
+        racePlaying = race.isStreaming
+    }
+
+    func resetRace() {
+        race.reset(profile: raceProfile)
+        racePlaying = false
+        raceDistance = nil
+        raceLastFix = nil
+        raceHR = nil
+        raceTime = 0
+        raceLabel = "—"
+    }
+
+    private func receive(_ fix: LocationSample) {
+        raceLastFix = fix
+        raceTime = max(raceTime, fix.t)
+        // Distance comes from the GPS, the way it will on a real run.
+        guard fix.horizontalAccuracy <= 20, let course = race.run.plan.course else { return }
+        raceDistance = course.locate(latitude: fix.latitude, longitude: fix.longitude, near: raceDistance).distance
+    }
+
+    private var raceTag: String {
+        guard raceLastFix != nil || raceHR != nil else { return "—" }
+        let miles = (raceDistance ?? 0) / DistanceUnit.metersPerMile
+        let total = Int(raceTime)
+        let clock = String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
+        let hr = raceHR.map { "HR \(Int($0))" } ?? "HR —"
+        let gps: String
+        if let fix = raceLastFix, raceTime - fix.t < 3 {
+            gps = String(format: "±%.0f m", fix.horizontalAccuracy)
+        } else {
+            gps = "NO GPS"
+        }
+        let done = race.run.isFinished ? " · FINISHED" : ""
+        return String(format: "%.2f mi · %@ · %@ · %@%@", miles, clock, hr, gps, done)
+    }
+
     // MARK: - Vitals
 
     private func receive(_ sample: VitalsSample) {
@@ -228,6 +312,10 @@ final class HUDController: ObservableObject {
             synthetic.start()
         } else {
             synthetic.stop()
+        }
+        if vitalsMode != .race {
+            race.stop()
+            racePlaying = false
         }
     }
 
@@ -284,6 +372,10 @@ final class HUDController: ObservableObject {
                 "\($0.tag) · \($0.line1)"
             } ?? (self.engine.band == .stationary ? "dashboard" : "ambient only")
             self.vitalsLabel = self.vitalsTag
+            if self.vitalsMode == .race {
+                self.raceLabel = self.raceTag
+                self.racePlaying = self.race.isStreaming
+            }
         }
 
         if !showCalibrationOnConnect {

@@ -5,7 +5,7 @@
 
 import Foundation
 
-public enum PacingStrategy: Sendable, Equatable {
+public enum PacingStrategy: Sendable, Equatable, Codable {
     /// Same pace the whole way.
     case even
     /// Second half run `percent` faster than the first, e.g. 2 = 2% faster.
@@ -18,7 +18,7 @@ public enum PacingStrategy: Sendable, Equatable {
 
 /// Heart rate zones as bpm boundaries. `boundaries[i]` is the top of zone i+1,
 /// so four boundaries give five zones.
-public struct HeartRateZones: Sendable, Equatable {
+public struct HeartRateZones: Sendable, Equatable, Codable {
     public var resting: Double
     public var threshold: Double
     public var max: Double
@@ -129,5 +129,43 @@ public struct RunPlan: Sendable {
 
     public func targetSecondsPerKilometer(at distance: Double) -> Double {
         targetPace(at: distance, per: .kilometers)
+    }
+}
+
+// Codable/Equatable over the inputs only; the pace segments are derived from them.
+extension RunPlan: Codable, Equatable {
+    private enum CodingKeys: String, CodingKey {
+        case distanceMeters, targetTime, pacing, course, heartRateZones, fuelEvery
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let distance = try c.decode(Double.self, forKey: .distanceMeters)
+        let time = try c.decode(TimeInterval.self, forKey: .targetTime)
+        guard distance > 0, time > 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .distanceMeters, in: c,
+                                                   debugDescription: "plan needs a distance and a time")
+        }
+        self.init(distanceMeters: distance,
+                  targetTime: time,
+                  pacing: try c.decode(PacingStrategy.self, forKey: .pacing),
+                  course: try c.decodeIfPresent(Course.self, forKey: .course),
+                  heartRateZones: try c.decodeIfPresent(HeartRateZones.self, forKey: .heartRateZones),
+                  fuelEvery: try c.decodeIfPresent(TimeInterval.self, forKey: .fuelEvery))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(distanceMeters, forKey: .distanceMeters)
+        try c.encode(targetTime, forKey: .targetTime)
+        try c.encode(pacing, forKey: .pacing)
+        try c.encodeIfPresent(course, forKey: .course)
+        try c.encodeIfPresent(heartRateZones, forKey: .heartRateZones)
+        try c.encodeIfPresent(fuelEvery, forKey: .fuelEvery)
+    }
+
+    public static func == (a: RunPlan, b: RunPlan) -> Bool {
+        a.distanceMeters == b.distanceMeters && a.targetTime == b.targetTime && a.pacing == b.pacing
+            && a.course == b.course && a.heartRateZones == b.heartRateZones && a.fuelEvery == b.fuelEvery
     }
 }
