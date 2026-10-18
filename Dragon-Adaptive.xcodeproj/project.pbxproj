@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		D35B04D42FDF0D0A008E4D41 /* ActiveLookSDK in Frameworks */ = {isa = PBXBuildFile; productRef = D35B04D32FDF0D0A008E4D41 /* ActiveLookSDK */; };
 		D35B04DA2FDF1B7C008E4D41 /* MotionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = D35B04D82FDF1B7C008E4D41 /* MotionSource.swift */; };
+		D35B04E32FDF2000008E4D41 /* DragonEngine in Frameworks */ = {isa = PBXBuildFile; productRef = D35B04E22FDF2000008E4D41 /* DragonEngine */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +60,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D35B04D42FDF0D0A008E4D41 /* ActiveLookSDK in Frameworks */,
+				D35B04E32FDF2000008E4D41 /* DragonEngine in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -129,6 +131,7 @@
 			name = "Dragon-Adaptive";
 			packageProductDependencies = (
 				D35B04D32FDF0D0A008E4D41 /* ActiveLookSDK */,
+				D35B04E22FDF2000008E4D41 /* DragonEngine */,
 			);
 			productName = "Dragon-Adaptive";
 			productReference = D35B04852FDF0C78008E4D41 /* Dragon-Adaptive.app */;
@@ -214,6 +217,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D35B04D22FDF0D0A008E4D41 /* XCLocalSwiftPackageReference "../../ios-sdk" */,
+				D35B04E12FDF2000008E4D41 /* XCLocalSwiftPackageReference "Packages/DragonEngine" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D35B04862FDF0C78008E4D41 /* Products */;
@@ -606,12 +610,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../../ios-sdk";
 		};
+		D35B04E12FDF2000008E4D41 /* XCLocalSwiftPackageReference "Packages/DragonEngine" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/DragonEngine;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		D35B04D32FDF0D0A008E4D41 /* ActiveLookSDK */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ActiveLookSDK;
+		};
+		D35B04E22FDF2000008E4D41 /* DragonEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DragonEngine;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

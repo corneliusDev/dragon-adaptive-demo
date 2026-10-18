@@ -5,13 +5,13 @@
 
 import Foundation
 
-enum HUDFont: UInt8 {
+public enum HUDFont: UInt8 {
     case small = 1
     case medium = 2
     case large = 3
     case huge = 4
 
-    var advance: Int {
+    public var advance: Int {
         switch self {
         case .small: return 7
         case .medium: return 10
@@ -21,12 +21,12 @@ enum HUDFont: UInt8 {
     }
 }
 
-enum HUDAlign {
+public enum HUDAlign {
     case left
     case center
 }
 
-enum HUDOp {
+public enum HUDOp {
     case clear
     case luma(UInt8)
     case text(x: Int, y: Int, font: HUDFont, color: UInt8, align: HUDAlign, _ string: String)
@@ -37,27 +37,29 @@ enum HUDOp {
     case circf(x: Int, y: Int, r: Int, color: UInt8)
 }
 
-enum Display {
-    static let w = 304
-    static let h = 256
-    static let cx = 152
-    static let cy = 128
+public enum Display {
+    public static let w = 304
+    public static let h = 256
+    public static let cx = 152
+    public static let cy = 128
 
     // Conservative visible area for real glasses.
-    static let safeMinX = 20
-    static let safeMaxX = 284
-    static let safeMinY = 30
-    static let safeMaxY = 220
+    public static let safeMinX = 20
+    public static let safeMaxX = 284
+    public static let safeMinY = 30
+    public static let safeMaxY = 220
 }
 
-struct HUDFrame {
-    var ops: [HUDOp] = []
+public struct HUDFrame {
+    public var ops: [HUDOp] = []
 
-    mutating func add(_ op: HUDOp) {
+    public init() {}
+
+    public mutating func add(_ op: HUDOp) {
         ops.append(op)
     }
 
-    var signature: String {
+    public var signature: String {
         ops.map { op in
             switch op {
             case .clear:

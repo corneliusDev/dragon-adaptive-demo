@@ -12,6 +12,7 @@
 
 import Foundation
 import ActiveLookSDK
+import DragonEngine
 
 final class GlassesBackend {
     private weak var glasses: Glasses?

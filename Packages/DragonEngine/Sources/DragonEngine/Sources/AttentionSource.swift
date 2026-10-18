@@ -5,9 +5,9 @@
 
 import Foundation
 
-enum AttentionEvent { case glance, dwell, idle }
+public enum AttentionEvent { case glance, dwell, idle }
 
-protocol AttentionSource: AnyObject {
+public protocol AttentionSource: AnyObject {
     var onEvent: ((AttentionEvent) -> Void)? { get set }
     func start()
     func stop()

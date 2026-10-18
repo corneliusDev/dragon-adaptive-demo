@@ -7,10 +7,14 @@
 //  - Sends a short BLE OK test pattern after connect.
 //  - Then hands off to the adaptive HUD.
 //  - Forces redraws on gesture, reset, scenario change, and run toggle.
+//
+//  The engine is clock-free: this controller owns run time (monotonic seconds
+//  since launch) and passes it to every engine call.
 
 import Foundation
 import Combine
 import SwiftUI
+import DragonEngine
 
 enum VitalsMode {
     case manual      // motion slider; HR estimated from motion
@@ -43,7 +47,11 @@ final class HUDController: ObservableObject {
     // HR older than this is treated as missing and the engine falls back to its estimate.
     private let hrStaleAfter: TimeInterval = 5
     private var lastHR: Double?
-    private var lastHRAt = Date.distantPast
+    private var lastHRAt: TimeInterval = -.infinity   // run time of the last HR reading
+
+    // Monotonic run time handed to the engine.
+    private let launchUptime = ProcessInfo.processInfo.systemUptime
+    private var now: TimeInterval { ProcessInfo.processInfo.systemUptime - launchUptime }
 
     private var gesture: GestureAttentionSource?
     private var backend: GlassesBackend?
@@ -58,8 +66,9 @@ final class HUDController: ObservableObject {
 
         sim.onEvent = { [weak self] event in
             print("[HUDController] simulated attention event: \(event)")
-            self?.engine.handle(event)
-            self?.backend?.invalidate()
+            guard let self = self else { return }
+            self.engine.handle(event, at: self.now)
+            self.backend?.invalidate()
         }
         sim.start()
 
@@ -91,8 +100,9 @@ final class HUDController: ObservableObject {
             let gesture = GestureAttentionSource(glasses: glasses)
             gesture.onEvent = { [weak self] event in
                 print("[HUDController] glasses gesture event: \(event)")
-                self?.engine.handle(event)
-                self?.backend?.invalidate()
+                guard let self = self else { return }
+                self.engine.handle(event, at: self.now)
+                self.backend?.invalidate()
             }
             gesture.start()
             self.gesture = gesture
@@ -208,7 +218,7 @@ final class HUDController: ObservableObject {
 
         if let hr = sample.heartRate {
             lastHR = hr
-            lastHRAt = sample.timestamp
+            lastHRAt = now
         }
     }
 
@@ -225,12 +235,12 @@ final class HUDController: ObservableObject {
         synthetic.stop()
         synthetic.reset()
         lastHR = nil
-        lastHRAt = .distantPast
+        lastHRAt = -.infinity
         motion = 0
     }
 
     private var freshHeartRate: Int? {
-        guard let hr = lastHR, Date().timeIntervalSince(lastHRAt) < hrStaleAfter else {
+        guard let hr = lastHR, now - lastHRAt < hrStaleAfter else {
             return nil
         }
         return Int(hr)
@@ -264,7 +274,7 @@ final class HUDController: ObservableObject {
         engine.motion = motionSource.value
         engine.measuredHeartRate = freshHeartRate
 
-        let nextFrame = engine.tick(dt: dt)
+        let nextFrame = engine.tick(dt: dt, at: now)
 
         DispatchQueue.main.async {
             self.frame = nextFrame

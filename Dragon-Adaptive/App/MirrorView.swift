@@ -3,6 +3,7 @@
 //  This is a safe-zone mirror, not a pixel-perfect ActiveLook firmware renderer.
 
 import SwiftUI
+import DragonEngine
 
 struct MirrorView: View {
     let frame: HUDFrame

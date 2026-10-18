@@ -1,5 +1,6 @@
 //  ContentView.swift
 import SwiftUI
+import DragonEngine
 
 struct ContentView: View {
     @StateObject private var hud = HUDController()
