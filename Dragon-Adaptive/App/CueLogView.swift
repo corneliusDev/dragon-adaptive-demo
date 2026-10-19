@@ -1,7 +1,8 @@
 //  CueLogView.swift
 //  The post-race review: every cue that showed, with the arbiter's decision
 //  and reason, what the runner did (glanced, held a look, ignored, dismissed)
-//  and, for pace-gap and heart-rate cues, whether it helped a minute later;
+//  and, for pace-gap and heart-rate cues, whether it helped a minute later
+//  (pace back toward plan, or heart rate down; the gap is shown alongside);
 //  plus how many cues of each kind were held back or expired without showing.
 //  SHARE exports the run's JSON-lines file through the share sheet.
 
@@ -25,16 +26,32 @@ enum CueLogFormat {
         }
     }
 
-    /// "gap +0:18 → +0:35 after 60 s · worse", "HR 176 → 171 after 60 s · better".
+    /// "pace +4.7% → +3.1% after 60 s · better · gap +0:28 → +0:29, +0:04 at 180 s",
+    /// "HR 176 → 171 after 60 s · better". The pace offset decides; the gap is information.
     static func outcome(_ o: CueOutcome) -> String {
         func value(_ v: Double?) -> String {
             guard let v else { return "—" }
-            return o.measure == .gap ? RunStateFormat.gap(v) : "\(Int(v.rounded()))"
+            switch o.measure {
+            case .paceOffset: return String(format: "%+.1f%%", v * 100)
+            case .heartRate: return "\(Int(v.rounded()))"
+            }
         }
-        let name = o.measure == .gap ? "gap" : "HR"
-        guard o.after != nil else { return "\(name) \(value(o.atShow)) · waiting" }
-        let verdict = o.improved.map { $0 ? "better" : "worse" } ?? "unknown"
-        return "\(name) \(value(o.atShow)) → \(value(o.after)) after \(Int((o.at - o.shownAt).rounded())) s · \(verdict)"
+        let name = o.measure == .paceOffset ? "pace" : "HR"
+        var text: String
+        if o.after == nil {
+            text = "\(name) \(value(o.atShow)) · waiting"
+        } else {
+            let verdict = o.improved.map { $0 ? "better" : "worse" } ?? "unknown"
+            text = "\(name) \(value(o.atShow)) → \(value(o.after)) after \(Int((o.at - o.shownAt).rounded())) s · \(verdict)"
+        }
+        if let g = o.gapAtShow {
+            text += " · gap \(RunStateFormat.gap(g))"
+            if let a = o.gapAfter { text += " → \(RunStateFormat.gap(a))" }
+            if let l = o.gapLater, let at = o.laterAt {
+                text += ", \(RunStateFormat.gap(l)) at \(Int((at - o.shownAt).rounded())) s"
+            }
+        }
+        return text
     }
 
     /// "MILE 3 · 8:14"

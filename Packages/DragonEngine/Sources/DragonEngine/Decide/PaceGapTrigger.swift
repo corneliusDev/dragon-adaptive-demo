@@ -74,7 +74,12 @@ public struct PaceGapTrigger: Trigger {
     }
 
     /// Fraction the rolling pace is off plan (+ = slower); nil while pace is unknown.
-    private func paceOff(_ s: RunState) -> Double? {
+    private func paceOff(_ s: RunState) -> Double? { Self.paceOffset(s, plan: plan) }
+
+    /// Fraction the rolling pace (grade-adjusted when known, else 60 s) is off
+    /// the plan's target pace at the state's distance: + = slower, 0.03 = 3%.
+    /// nil while pace is unknown. The cue log judges a pace-gap cue's outcome by it.
+    public static func paceOffset(_ s: RunState, plan: RunPlan) -> Double? {
         guard !s.quality.paceUnknown, let pace = s.gradeAdjustedPace ?? s.pace60s else { return nil }
         return pace / plan.targetPace(at: s.distance) - 1
     }

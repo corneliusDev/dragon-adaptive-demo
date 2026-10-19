@@ -104,7 +104,7 @@ public struct RunEngine {
         capacity = Capacity(config: config.capacity, setting: config.display, raceDistance: plan.distanceMeters)
         logger = CueLogger(header: CueLog.Header(name: config.name, targetTime: plan.targetTime,
                                                  distance: plan.distanceMeters, display: config.display),
-                           config: config.log)
+                           plan: plan, config: config.log)
     }
 
     public mutating func ingest(_ event: RunEvent) {

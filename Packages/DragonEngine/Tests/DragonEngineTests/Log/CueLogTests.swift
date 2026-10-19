@@ -1,8 +1,9 @@
 //  CueLogTests.swift
 //  Chunk 8 acceptance: the cue log. Every arbiter decision is in it (held
 //  back and expired too), attention is matched to the cue on screen, the
-//  pace-gap cue's outcome is read a minute later, a log saves and loads with
-//  no loss, and a two-hour run's log stays small.
+//  pace-gap cue's outcome is read a minute later (judged by the runner's pace
+//  offset, with the projected-finish gap recorded at +60 s and +180 s), a log
+//  saves and loads with no loss, and a two-hour run's log stays small.
 
 import XCTest
 import DragonEngine
@@ -15,6 +16,13 @@ private struct LoggedRace {
     var decisions: [(decision: Decision, cue: Cue)] = []
     /// Run time each cue first went on screen, by key (first time only).
     var firstShown: [CueKey: TimeInterval] = [:]
+    /// The runner's true distance after each update, with its run time.
+    var trueDistance: [(t: TimeInterval, distance: Double)] = []
+
+    /// Run time the runner first reached `d` metres; nil if they never did.
+    func time(reaching d: Double) -> TimeInterval? { trueDistance.first { $0.distance >= d }?.t }
+    /// The runner's true distance at run time `t` (the first update at or after it).
+    func distance(at t: TimeInterval) -> Double? { trueDistance.first { $0.t >= t }?.distance }
 }
 
 private func logRace(_ profile: SyntheticProfile, seed: UInt64 = 42, plan: RunPlan? = nil,
@@ -40,6 +48,7 @@ private func logRace(_ profile: SyntheticProfile, seed: UInt64 = 42, plan: RunPl
         let step = race.engine.update(at: run.time)
         race.decisions += zip(step.decisions, race.engine.arbiter.decided).map { ($0, $1) }
         if let c = step.current, race.firstShown[c.key] == nil { race.firstShown[c.key] = run.time }
+        race.trueDistance.append((run.time, run.distance))
     }
     if let finish = run.finishTime { race.engine.finish(at: finish) }
     race.run = run
@@ -125,61 +134,160 @@ final class CueLogTests: XCTestCase {
 
     // MARK: Outcomes
 
-    func testSlowFadePaceGapOutcomeShowsTheGapGrowing() {
+    func testSlowFadePaceGapOutcomeIsNotImprovedAndTheGapGrows() {
+        // The runner keeps fading after the cue: pace stays off plan, and the
+        // projected finish keeps slipping at +60 s and +180 s.
         let race = logRace(.slowFade(from: 9 * mile))
         let gaps = race.engine.log.appearances.filter { $0.cue.kind == .paceGap }
         XCTAssertEqual(gaps.count, 1)
-        guard let o = gaps.first?.outcome, let before = o.atShow, let after = o.after, let delta = o.delta else {
+        guard let o = gaps.first?.outcome, let before = o.atShow, let after = o.after, let delta = o.delta,
+              let gapAtShow = o.gapAtShow, let gapAfter = o.gapAfter, let gapLater = o.gapLater,
+              let laterAt = o.laterAt else {
             return XCTFail("no outcome read for the pace-gap cue")
         }
-        XCTAssertEqual(o.measure, .gap)
+        XCTAssertEqual(o.measure, .paceOffset)
         XCTAssertEqual(o.shownAt, gaps[0].t)
         XCTAssertEqual(o.at - o.shownAt, 60, accuracy: 1)
-        XCTAssertGreaterThan(before, 15)
-        XCTAssertGreaterThan(after, before)
+        XCTAssertEqual(laterAt - o.shownAt, 180, accuracy: 1)
+        // The cue fires on a pace more than 3% slow, and it is no better a minute on.
+        XCTAssertGreaterThan(before, 0.03)
+        XCTAssertGreaterThan(after, 0.03)
         XCTAssertEqual(delta, after - before, accuracy: 1e-9)
-        XCTAssertEqual(o.improved, false)
+        XCTAssertEqual(o.improved, false, "pace offset \(before) → \(after)")
+        // The gap: information only, and growing.
+        XCTAssertGreaterThan(gapAtShow, 15)
+        XCTAssertGreaterThan(gapAfter, gapAtShow)
+        XCTAssertGreaterThan(gapLater, gapAtShow)
+        XCTAssertEqual(o.gapDelta60!, gapAfter - gapAtShow, accuracy: 1e-9)
+        XCTAssertEqual(o.gapDelta180!, gapLater - gapAtShow, accuracy: 1e-9)
+        XCTAssertGreaterThan(o.gapDelta60!, 0)
+        XCTAssertGreaterThan(o.gapDelta180!, 0)
         // Splits have no outcome.
         XCTAssertTrue(race.engine.log.appearances.filter { $0.cue.kind == .split }.allSatisfy { $0.outcome == nil })
     }
 
-    func testSlowFadeRecoveryPaceGapOutcomeShowsTheGapShrinking() {
-        // The recovery starts at mile 9.4, as the pace-gap cue goes up (about mile 9.42),
-        // the earliest it can start with the cue still firing.
-        // KNOWN FAILING (chunk 8, awaiting a decision): here the projected-finish
-        // gap 60 s after the cue is larger than at show (≈18 s → ≈29 s). The
-        // estimator's projection follows a 5-minute pace trend, so it only turns
-        // down ~90–120 s after the runner speeds up. When the recovery starts at
-        // or after the cue appears (the realistic case, incl. recoverAt = 10 mi)
-        // the gap always grows over 60 s. It shrinks only in narrow windows where
-        // the recovery starts shortly before the cue, on particular seeds (e.g.
-        // from 9 mi, recoverAt 9.27–9.28 mi, seed 7; from 8 mi, 8.26–8.28 mi,
-        // seed 7; from 6 mi, 6.31–6.32 mi, seed 42; from 8 mi, 8.35 mi, seed 42).
-        // Moving recoverAt by ~0.01–0.02 mi or changing the seed undoes it.
-        // Picking such a window would tune the scenario to the estimator's lag,
-        // so the scenario is left realistic. The options (tuned scenario, a
-        // faster-reacting measure, a longer delay, a faster projection) each
-        // change a spec value or committed behaviour and are left to a human.
-        let race = logRace(.slowFadeRecovery(from: 9 * mile, recoverAt: 9.4 * mile))
-        let gaps = race.engine.log.appearances.filter { $0.cue.kind == .paceGap }
-        XCTAssertEqual(gaps.count, 1)
-        guard let o = gaps.first?.outcome, let before = o.atShow, let after = o.after else {
-            return XCTFail("no outcome read for the pace-gap cue")
+    func testSlowFadeRecoveryPaceGapOutcomeIsImprovedWhenTheRunnerRespondsToTheCue() {
+        // The runner speeds up 5–20 s after the pace-gap cue appears ("you see it,
+        // you respond"). Find where the cue appears with the fade never recovering
+        // (the same run up to the recovery), then recover from the distance the
+        // runner has reached `lag` seconds later. The fade starts at mile 8: from
+        // mile 9 on seed 42 the cue fires on a 60 s pace only 3.8% slow (the first
+        // reading past the trigger's 3%, a noisy low), and the profile's recovery
+        // ramps over 400 m, so a minute on the pace is no better than that reading.
+        let from = 8 * mile
+        let probe = logRace(.slowFadeRecovery(from: from, recoverAt: SyntheticProfile.halfMarathon))
+        guard let t0 = probe.firstShown[.paceGap] else { return XCTFail("no pace gap shown") }
+        for lag: TimeInterval in [5, 12, 20] {
+            guard let recoverAt = probe.distance(at: t0 + lag) else { return XCTFail("no distance at +\(lag) s") }
+            let race = logRace(.slowFadeRecovery(from: from, recoverAt: recoverAt))
+            XCTAssertEqual(race.firstShown[.paceGap], t0, "the run is the same up to the recovery")
+            guard let recovery = race.time(reaching: recoverAt) else { return XCTFail("never reached \(recoverAt) m") }
+            XCTAssertGreaterThanOrEqual(recovery - t0, 5, "the recovery starts after the cue appears")
+            XCTAssertLessThanOrEqual(recovery - t0, 20)
+
+            let gaps = race.engine.log.appearances.filter { $0.cue.kind == .paceGap }
+            XCTAssertEqual(gaps.count, 1, "lag \(lag)")
+            XCTAssertEqual(gaps.first?.t, t0)
+            guard let o = gaps.first?.outcome, let before = o.atShow, let after = o.after,
+                  let gapAfter = o.gapAfter, let gapLater = o.gapLater else {
+                return XCTFail("no outcome read for the pace-gap cue")
+            }
+            XCTAssertEqual(o.measure, .paceOffset)
+            XCTAssertEqual(o.at - o.shownAt, 60, accuracy: 1)
+            // Pace back toward plan by at least the margin: improved.
+            XCTAssertGreaterThan(before, 0.03)
+            XCTAssertLessThanOrEqual(after, before - race.engine.config.log.paceOffsetMargin,
+                                     "lag \(lag): pace offset \(before) → \(after)")
+            XCTAssertEqual(o.improved, true, "lag \(lag)")
+            // The projection catches up later: the gap at +180 s is smaller than at +60 s.
+            XCTAssertLessThan(gapLater, gapAfter, "lag \(lag): gap at +60 s \(gapAfter), at +180 s \(gapLater)")
         }
-        XCTAssertEqual(o.at - o.shownAt, 60, accuracy: 1)
-        XCTAssertLessThan(after, before, "gap at show \(before), 60 s later \(after)")
-        XCTAssertEqual(o.improved, true)
+    }
+
+    func testPaceOffsetOutcomeImprovedOnlyByTheMarginTowardPlan() {
+        let margin = CueLogger.Config().paceOffsetMargin
+        XCTAssertEqual(margin, 0.01)
+        func improved(_ a: Double, _ b: Double, margin m: Double = margin) -> Bool? {
+            CueOutcome(measure: .paceOffset, shownAt: 0, at: 60, atShow: a, after: b, margin: m).improved
+        }
+        // 5% slow → 4% slow is exactly one point back: improved; a little less is not.
+        XCTAssertEqual(improved(0.05, 0.04), true)
+        XCTAssertEqual(improved(0.05, 0.0405), false)
+        XCTAssertEqual(improved(0.05, 0.0395), true)
+        XCTAssertEqual(improved(0.05, 0.05), false)
+        XCTAssertEqual(improved(0.05, 0.07), false)
+        // Ahead of plan: back toward plan is slower.
+        XCTAssertEqual(improved(-0.05, -0.03), true)
+        XCTAssertEqual(improved(-0.05, -0.0405), false)
+        XCTAssertEqual(improved(-0.05, -0.07), false)
+        // Overshooting plan counts only if it ends up that much closer.
+        XCTAssertEqual(improved(0.05, -0.02), true)
+        XCTAssertEqual(improved(0.05, -0.045), false)
+        // The margin is configurable.
+        XCTAssertEqual(improved(0.05, 0.04, margin: 0.02), false)
+        XCTAssertEqual(improved(0.05, 0.03, margin: 0.02), true)
+    }
+
+    func testPaceOffsetOutcomeFromHandBuiltStates() {
+        // 2 km in 10:00 = 0.3 s/m. 9% slow at show; a minute later 7.95% (just
+        // over a point back) or 8.05% (just under).
+        let plan = RunPlan(distanceMeters: 2_000, targetTime: 600)
+        let gap = Cue(key: .paceGap, priority: .critical, content: CueContent(main: .gap(18)),
+                      createdAt: 0, expiresAt: 30, minShow: 5)
+        var known = DataQuality()
+        known.paceUnknown = false
+        func outcome(after pace: Double, gradeAdjusted: Double? = nil) -> CueOutcome? {
+            var logger = CueLogger(header: CueLog.Header(targetTime: 600, distance: 2_000), plan: plan)
+            func step(_ t: TimeInterval, _ items: [(Cue, Decision.Reason)], pace: Double, gap g: Double,
+                      gradeAdjusted: Double? = nil) {
+                let s = RunState(elapsed: t, distance: 500 + t * 3, pace60s: pace, gradeAdjustedPace: gradeAdjusted,
+                                 gapToTarget: g, quality: known)
+                logger.record(items.map { Decision(t: t, key: $0.0.key, priority: $0.0.priority, reason: $0.1) },
+                              cues: items.map(\.0), state: s, budget: .steady, at: t)
+            }
+            step(0, [(gap, .won)], pace: 0.327, gap: 18)
+            step(5, [(gap, .finished)], pace: 0.326, gap: 19)
+            step(60, [], pace: pace, gap: 24, gradeAdjusted: gradeAdjusted)
+            step(180, [], pace: 0.3, gap: 15)
+            return logger.log.appearances.first?.outcome
+        }
+        let better = outcome(after: 0.32385)
+        XCTAssertEqual(better?.measure, .paceOffset)
+        XCTAssertEqual(better!.atShow!, 0.09, accuracy: 1e-9)
+        XCTAssertEqual(better!.after!, 0.0795, accuracy: 1e-9)
+        XCTAssertEqual(better?.improved, true)
+        XCTAssertEqual(better?.gapAtShow, 18)
+        XCTAssertEqual(better?.gapAfter, 24)
+        XCTAssertEqual(better?.gapLater, 15)
+        XCTAssertEqual(better?.gapDelta60, 6)
+        XCTAssertEqual(better?.gapDelta180, -3)
+        XCTAssertEqual(better?.laterAt, 180)
+        XCTAssertEqual(outcome(after: 0.32415)?.improved, false)
+        // Grade-adjusted pace is used when known: slow on a climb, on plan once adjusted.
+        XCTAssertEqual(outcome(after: 0.36, gradeAdjusted: 0.3)?.improved, true)
+        // No plan: the pace offset is unknown, so is the verdict; the gap is still recorded.
+        var noPlan = CueLogger(header: CueLog.Header(targetTime: 600, distance: 2_000))
+        for (t, items) in [(0.0, [(gap, Decision.Reason.won)]), (60, [])] {
+            noPlan.record(items.map { Decision(t: t, key: $0.0.key, priority: $0.0.priority, reason: $0.1) },
+                          cues: items.map(\.0), state: RunState(elapsed: t, distance: 100, pace60s: 0.33,
+                                                                gapToTarget: 18, quality: known),
+                          budget: .steady, at: t)
+        }
+        XCTAssertNil(noPlan.log.appearances[0].outcome?.improved)
+        XCTAssertEqual(noPlan.log.appearances[0].outcome?.gapAtShow, 18)
     }
 
     func testOutcomeArithmetic() {
-        let gap = CueOutcome(measure: .gap, shownAt: 10, at: 70, atShow: 20, after: 12)
-        XCTAssertEqual(gap.delta, -8)
-        XCTAssertEqual(gap.improved, true)
-        // Ahead of target: closer to zero is better, so going further ahead isn't.
-        XCTAssertEqual(CueOutcome(measure: .gap, shownAt: 0, at: 60, atShow: -20, after: -30).improved, false)
+        let pace = CueOutcome(measure: .paceOffset, shownAt: 10, at: 70, atShow: 0.06, after: 0.02,
+                              gapAtShow: 20, gapAfter: 26, laterAt: 190, gapLater: 12)
+        XCTAssertEqual(pace.delta!, -0.04, accuracy: 1e-12)
+        XCTAssertEqual(pace.improved, true)
+        XCTAssertEqual(pace.gapDelta60, 6)
+        XCTAssertEqual(pace.gapDelta180, -8)
         XCTAssertEqual(CueOutcome(measure: .heartRate, shownAt: 0, at: 60, atShow: 176, after: 171).improved, true)
         XCTAssertEqual(CueOutcome(measure: .heartRate, shownAt: 0, at: 60, atShow: 170, after: 174).delta, 4)
-        XCTAssertNil(CueOutcome(measure: .gap, shownAt: 0, at: 60, atShow: 5, after: nil).improved)
+        XCTAssertNil(CueOutcome(measure: .paceOffset, shownAt: 0, at: 60, atShow: 0.05, after: nil).improved)
+        XCTAssertNil(CueOutcome(measure: .paceOffset, shownAt: 0, at: 60, atShow: 0.05, after: nil, gapAtShow: 3).gapDelta60)
     }
 
     // MARK: Responses
@@ -243,10 +351,14 @@ final class CueLogTests: XCTestCase {
         XCTAssertEqual(log.appearances.map(\.response), [.glanced, .ignored])
         XCTAssertEqual(log.events[0].state.heartRate, 160)
         XCTAssertEqual(log.events[0].state.situation, .raceEffort)
+        // No plan and no pace here: the gap is recorded, the pace verdict is unknown
+        // (testPaceOffsetOutcomeFromHandBuiltStates covers the verdict).
         let o = log.appearances[0].outcome
-        XCTAssertEqual(o?.atShow, 18)
-        XCTAssertEqual(o?.after, 11)
-        XCTAssertEqual(o?.improved, true)
+        XCTAssertEqual(o?.measure, .paceOffset)
+        XCTAssertEqual(o?.gapAtShow, 18)
+        XCTAssertEqual(o?.gapAfter, 11)
+        XCTAssertEqual(o?.gapDelta60, -7)
+        XCTAssertNil(o?.improved)
         XCTAssertNil(log.appearances[1].outcome)
         XCTAssertEqual(Set(log.events.map(\.cue.id)).count, 2)
     }

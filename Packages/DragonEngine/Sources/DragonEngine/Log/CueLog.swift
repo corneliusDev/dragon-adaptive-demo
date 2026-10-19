@@ -95,11 +95,21 @@ public struct CueStateSnapshot: Sendable, Equatable, Codable {
     }
 }
 
-/// Did it help: how the number a cue was about moved in the minute after it showed.
+/// Did it help: how the runner responded in the minute after a cue showed.
+///
+/// A pace-gap cue is judged by the runner's pace, not the projected finish:
+/// the projection follows a ~5-minute trend, so a minute after the cue it is
+/// still catching up with what the runner did before it. `improved` asks
+/// whether the pace offset (rolling pace vs plan) moved back toward plan by at
+/// least a margin (CueLogger.Config.paceOffsetMargin). The projected-finish
+/// gap is recorded too, at show, after the outcome delay and at a later check,
+/// as information only. A heart-rate cue is judged by heart rate.
 public struct CueOutcome: Sendable, Equatable, Codable {
     public enum Measure: String, Sendable, Codable {
-        /// Projected finish − target, seconds (+ = behind). Improved = closer to 0.
-        case gap
+        /// Fraction the rolling pace (60 s, grade-adjusted when known) is off
+        /// the plan's target pace at that distance: + = slower, 0.05 = 5%.
+        /// Improved = moved toward 0 by at least the margin.
+        case paceOffset
         /// bpm. Improved = lower.
         case heartRate
     }
@@ -115,7 +125,23 @@ public struct CueOutcome: Sendable, Equatable, Codable {
     /// nil if either is unknown.
     public var improved: Bool?
 
-    public init(measure: Measure, shownAt: TimeInterval, at: TimeInterval, atShow: Double?, after: Double?) {
+    /// Projected finish − target (+ = behind) at show, at `at`, and at the
+    /// later check `laterAt` (≈ shownAt + 180 s). Information, not the verdict.
+    public var gapAtShow: TimeInterval?
+    public var gapAfter: TimeInterval?
+    public var laterAt: TimeInterval?
+    public var gapLater: TimeInterval?
+    /// gapAfter − gapAtShow and gapLater − gapAtShow (named for the default
+    /// 60 s and 180 s delays); nil if either is unknown. + = the gap grew.
+    public var gapDelta60: TimeInterval?
+    public var gapDelta180: TimeInterval?
+
+    /// `margin` is how far (as a fraction) a pace offset must move toward plan
+    /// to count as improved; heart rate ignores it.
+    public init(measure: Measure, shownAt: TimeInterval, at: TimeInterval, atShow: Double?, after: Double?,
+                margin: Double = CueLogger.Config.defaultPaceOffsetMargin,
+                gapAtShow: TimeInterval? = nil, gapAfter: TimeInterval? = nil,
+                laterAt: TimeInterval? = nil, gapLater: TimeInterval? = nil) {
         self.measure = measure
         self.shownAt = shownAt
         self.at = at
@@ -123,14 +149,32 @@ public struct CueOutcome: Sendable, Equatable, Codable {
         self.after = after
         if let a = atShow, let b = after {
             delta = b - a
-            improved = measure == .gap ? abs(b) < abs(a) : b < a
+            improved = Self.improved(measure, from: a, to: b, margin: margin)
+        }
+        self.gapAtShow = gapAtShow
+        self.gapAfter = gapAfter
+        self.laterAt = laterAt
+        self.gapLater = gapLater
+        if let a = gapAtShow {
+            gapDelta60 = gapAfter.map { $0 - a }
+            gapDelta180 = gapLater.map { $0 - a }
+        }
+    }
+
+    /// Whether a move from `a` to `b` is an improvement. A pace offset must get
+    /// closer to plan (0) by at least `margin`; overshooting to the other side
+    /// counts only if it ends up that much closer.
+    public static func improved(_ measure: Measure, from a: Double, to b: Double, margin: Double) -> Bool {
+        switch measure {
+        case .paceOffset: return abs(a) - abs(b) >= margin - 1e-12
+        case .heartRate: return b < a
         }
     }
 
     /// The reading this measure takes from a state.
-    static func value(_ measure: Measure, _ s: RunState) -> Double? {
+    static func value(_ measure: Measure, _ s: RunState, plan: RunPlan?) -> Double? {
         switch measure {
-        case .gap: return s.gapToTarget
+        case .paceOffset: return plan.flatMap { PaceGapTrigger.paceOffset(s, plan: $0) }
         case .heartRate: return s.heartRate
         }
     }
@@ -262,7 +306,7 @@ public struct CueLog: Sendable, Equatable, Codable {
 
 /// Builds a CueLog from the arbiter's decisions as a run goes: matches the
 /// runner's attention to the cue on screen, and fills in each pace-gap and
-/// heart-rate cue's outcome a minute after it showed.
+/// heart-rate cue's outcome a minute after it showed (and the gap again later).
 public struct CueLogger: Sendable {
     public struct Config: Sendable, Equatable {
         /// Seconds after a cue appears within which a glance or held look counts
@@ -270,8 +314,16 @@ public struct CueLogger: Sendable {
         public var responseWindow: TimeInterval = 3
         /// Seconds after a cue shows that its outcome is read.
         public var outcomeDelay: TimeInterval = 60
+        /// Seconds after a cue shows that the projected-finish gap is read again
+        /// (information only: the projection is slow to follow the runner).
+        public var gapCheckDelay: TimeInterval = 180
+        /// How far (fraction of plan pace) the pace offset must move back toward
+        /// plan for a pace-gap cue's outcome to count as improved: 0.01 = 1 point.
+        public var paceOffsetMargin = Config.defaultPaceOffsetMargin
         /// Kinds whose outcome is recorded, and what is measured for each.
-        public var outcomes: [CueKind: CueOutcome.Measure] = [.paceGap: .gap, .heartCeiling: .heartRate]
+        public var outcomes: [CueKind: CueOutcome.Measure] = [.paceGap: .paceOffset, .heartCeiling: .heartRate]
+
+        public static let defaultPaceOffsetMargin = 0.01
 
         public init() {}
     }
@@ -283,6 +335,8 @@ public struct CueLogger: Sendable {
     }
 
     public let config: Config
+    /// The plan pace offsets are measured against; nil leaves them unknown.
+    public let plan: RunPlan?
     public private(set) var log: CueLog
 
     private var ids: [Instance: Int] = [:]
@@ -291,11 +345,13 @@ public struct CueLogger: Sendable {
     private var open: [Int: Int] = [:]
     /// The cue on screen: its id, when it appeared, and its appearance event.
     private var onScreen: (id: Int, at: TimeInterval, event: Int)?
-    /// Appearance events still waiting for their outcome reading, and when it is due.
-    private var awaiting: [(event: Int, due: TimeInterval)] = []
+    /// Appearance events still waiting for an outcome reading, when it is due,
+    /// and whether it is the later gap check (else the outcome reading).
+    private var awaiting: [(event: Int, due: TimeInterval, later: Bool)] = []
 
-    public init(header: CueLog.Header, config: Config = Config()) {
+    public init(header: CueLog.Header, plan: RunPlan? = nil, config: Config = Config()) {
         self.config = config
+        self.plan = plan
         log = CueLog(header: header)
     }
 
@@ -323,10 +379,13 @@ public struct CueLogger: Sendable {
             if log.events[i].appeared && log.events[i].count == 1 {
                 onScreen = (id, d.t, i)
                 if let measure = config.outcomes[cue.key.kind] {
-                    // Start the outcome now, with the reading at show; the rest a minute later.
+                    // Start the outcome now, with the readings at show; the rest a minute later.
                     log.events[i].outcome = CueOutcome(measure: measure, shownAt: d.t, at: d.t,
-                                                       atShow: CueOutcome.value(measure, state), after: nil)
-                    awaiting.append((i, d.t + config.outcomeDelay))
+                                                       atShow: CueOutcome.value(measure, state, plan: plan),
+                                                       after: nil, margin: config.paceOffsetMargin,
+                                                       gapAtShow: state.gapToTarget)
+                    awaiting.append((i, d.t + config.outcomeDelay, false))
+                    awaiting.append((i, d.t + config.gapCheckDelay, true))
                 }
             } else if d.outcome == .expired, let shown = onScreen, shown.id == id {
                 // Off the screen: dismissed, or ignored if nothing came in the window.
@@ -340,11 +399,18 @@ public struct CueLogger: Sendable {
         }
         open = touched
 
-        // Outcomes now due.
+        // Outcome readings now due.
         awaiting.removeAll { item in
             guard t >= item.due, let o = log.events[item.event].outcome else { return false }
-            log.events[item.event].outcome = CueOutcome(measure: o.measure, shownAt: o.shownAt, at: t,
-                                                        atShow: o.atShow, after: CueOutcome.value(o.measure, state))
+            let read = item.later
+                ? CueOutcome(measure: o.measure, shownAt: o.shownAt, at: o.at, atShow: o.atShow, after: o.after,
+                             margin: config.paceOffsetMargin, gapAtShow: o.gapAtShow, gapAfter: o.gapAfter,
+                             laterAt: t, gapLater: state.gapToTarget)
+                : CueOutcome(measure: o.measure, shownAt: o.shownAt, at: t, atShow: o.atShow,
+                             after: CueOutcome.value(o.measure, state, plan: plan),
+                             margin: config.paceOffsetMargin, gapAtShow: o.gapAtShow,
+                             gapAfter: state.gapToTarget, laterAt: o.laterAt, gapLater: o.gapLater)
+            log.events[item.event].outcome = read
             return true
         }
     }

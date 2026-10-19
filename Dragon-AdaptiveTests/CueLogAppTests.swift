@@ -49,8 +49,13 @@ final class CueLogAppTests: XCTestCase {
 
         XCTAssertEqual(CueLogFormat.response(.heldLook), "held a look")
         XCTAssertEqual(CueLogFormat.response(nil), "still up")
-        XCTAssertEqual(CueLogFormat.outcome(CueOutcome(measure: .gap, shownAt: 100, at: 160, atShow: 18, after: 35)),
-                       "gap +0:18 → +0:35 after 60 s · worse")
+        XCTAssertEqual(CueLogFormat.outcome(CueOutcome(measure: .paceOffset, shownAt: 100, at: 160, atShow: 0.047,
+                                                       after: 0.031, gapAtShow: 28, gapAfter: 29,
+                                                       laterAt: 280, gapLater: 4)),
+                       "pace +4.7% → +3.1% after 60 s · better · gap +0:28 → +0:29, +0:04 at 180 s")
+        XCTAssertEqual(CueLogFormat.outcome(CueOutcome(measure: .paceOffset, shownAt: 100, at: 100, atShow: 0.047,
+                                                       after: nil, gapAtShow: 18)),
+                       "pace +4.7% · waiting · gap +0:18")
         XCTAssertEqual(CueLogFormat.outcome(CueOutcome(measure: .heartRate, shownAt: 0, at: 60, atShow: 176, after: 171)),
                        "HR 176 → 171 after 60 s · better")
         XCTAssertEqual(CueLogFormat.finish(summary), "not finished · target 1:45:00")
