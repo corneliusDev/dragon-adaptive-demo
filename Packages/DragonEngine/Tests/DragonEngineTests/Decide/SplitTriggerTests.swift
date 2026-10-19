@@ -70,4 +70,38 @@ final class SplitTriggerTests: XCTestCase {
         XCTAssertEqual(CueFormat.string(cues[0].content.heading!), "KM 1")
         XCTAssertEqual(trigger.splits[0].planTime, 300, accuracy: 1e-6)
     }
+
+    func testSplitOnAClimbIsDeferredToTheCrestAndExpiresAfterIt() {
+        // A 6% climb across the mile 1 marker; mile 2 is on the flat.
+        let hill = SyntheticHill(start: mile - 200, length: 500, gain: 30, descent: 600)
+        let hilly = RunPlan(distanceMeters: 5 * mile, targetTime: 2_400,
+                            course: .synthetic(length: 5 * mile, hills: [hill]))
+        guard let climb = hilly.course!.hills().first else { return XCTFail("no hill on the course") }
+        XCTAssertTrue(climb.startDistance < mile && mile < climb.endDistance)
+
+        var trigger = SplitTrigger(plan: hilly)
+        var cues: [Cue] = []
+        let speed = mile / 480
+        for t in 0...1_000 {
+            cues += trigger.evaluate(state: RunState(elapsed: Double(t), distance: Double(t) * speed), at: Double(t))
+        }
+        XCTAssertEqual(markers(cues), [.split(mile: 1), .split(mile: 2)])
+        let onClimb = cues[0], onFlat = cues[1]
+        XCTAssertEqual(onClimb.deferUntil, .distance(climb.endDistance))
+        // Expiry: the rest of the climb at 1.5x plan pace, then the usual 20 s.
+        let rest = (climb.endDistance - onClimb.createdAt * speed) * hilly.targetPace(at: mile) * 1.5
+        XCTAssertEqual(onClimb.expiresAt, onClimb.createdAt + rest + 20, accuracy: 0.01)
+        XCTAssertNil(onFlat.deferUntil)
+        XCTAssertEqual(onFlat.expiresAt, onFlat.createdAt + 20)
+
+        // Turned off, the climb's split shows at once like any other.
+        var config = SplitTrigger.Config()
+        config.deferOnClimbs = false
+        var plain = SplitTrigger(plan: hilly, config: config)
+        var plainCues: [Cue] = []
+        for t in 0...500 {
+            plainCues += plain.evaluate(state: RunState(elapsed: Double(t), distance: Double(t) * speed), at: Double(t))
+        }
+        XCTAssertNil(plainCues.first?.deferUntil)
+    }
 }

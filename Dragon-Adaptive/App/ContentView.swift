@@ -34,7 +34,8 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             if hud.vitalsMode == .race && hud.showStateOverlay {
                 RunStateDebugView(state: hud.raceState, targetTime: hud.raceTargetTime,
-                                      decisions: hud.raceDecisions)
+                                      decisions: hud.raceDecisions, budget: hud.raceBudget,
+                                      situation: hud.raceSituation)
                     .padding(.horizontal, 12).padding(.bottom, 6)
                     .onTapGesture { hud.toggleStateOverlay() }
             }
@@ -62,8 +63,22 @@ struct ContentView: View {
                 Spacer()
                 Text(hud.bandLabel).font(.system(size: 10, design: .monospaced)).foregroundColor(amber)
             }
-            Slider(value: $hud.motion, in: 0...100).accentColor(amber)
-                .disabled(hud.vitalsMode != .manual)
+            if hud.vitalsMode == .race {
+                // In a race the slider is the effort the capacity budget uses.
+                Slider(value: raceEffort, in: 0...100).accentColor(amber)
+                HStack {
+                    Text(hud.effortOverride.map { "BUDGET EFFORT \(Int($0)) (SLIDER)" } ?? "BUDGET EFFORT: MEASURED")
+                        .font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                    Spacer()
+                    if hud.effortOverride != nil {
+                        Button("USE MEASURED") { hud.useMeasuredEffort() }
+                            .font(.system(size: 10, design: .monospaced)).foregroundColor(phos)
+                    }
+                }
+            } else {
+                Slider(value: $hud.motion, in: 0...100).accentColor(amber)
+                    .disabled(hud.vitalsMode != .manual)
+            }
             HStack(spacing: 10) {
                 Text("SOURCE").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
                 sourceSeg("SLIDER", .manual); sourceSeg("WATCH", .synthetic); sourceSeg("RACE", .race)
@@ -72,6 +87,11 @@ struct ContentView: View {
                 raceControls
             }
         }
+    }
+
+    /// The race's slider: shows the measured effort until dragged, then the override.
+    private var raceEffort: Binding<Double> {
+        Binding(get: { hud.effortOverride ?? hud.motion }, set: { hud.effortOverride = $0 })
     }
 
     /// Synthetic race: pick a profile and speed, play it, watch distance and HR advance.
@@ -102,6 +122,10 @@ struct ContentView: View {
             }
             Text(hud.raceLabel).font(.system(size: 12, design: .monospaced)).foregroundColor(amber)
             #if DEBUG
+            HStack(spacing: 10) {
+                Text("DISPLAY").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                displaySeg("MINIMAL", .minimal); displaySeg("BALANCED", .balanced); displaySeg("COACH", .coach)
+            }
             Button(hud.showStateOverlay ? "HIDE STATE OVERLAY" : "SHOW STATE OVERLAY") { hud.toggleStateOverlay() }
                 .font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
             #endif
@@ -115,6 +139,15 @@ struct ContentView: View {
             .foregroundColor(hud.raceSpeed == speed ? phos : .gray)
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(RoundedRectangle(cornerRadius: 7).fill(hud.raceSpeed == speed ? Color(white: 0.14) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
+    }
+
+    private func displaySeg(_ title: String, _ setting: DisplaySetting) -> some View {
+        Button(title) { hud.displaySetting = setting }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(hud.displaySetting == setting ? phos : .gray)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 7).fill(hud.displaySetting == setting ? Color(white: 0.14) : .clear))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
     }
 

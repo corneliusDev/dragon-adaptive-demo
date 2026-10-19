@@ -13,7 +13,9 @@
 //
 //  Two pipelines: with a RunPlan loaded (a synthetic race, the RACE source) the
 //  plan-driven RunEngine decides what to show, from race run time; otherwise
-//  today's scenario AdaptiveEngine does.
+//  today's scenario AdaptiveEngine does. In the race the effort slider stands
+//  in for the measured effort in the capacity budget (drag it up and the
+//  display gets sparser), and the Minimal / Balanced / Coach setting shifts it.
 
 import Foundation
 import Combine
@@ -53,6 +55,17 @@ final class HUDController: ObservableObject {
     /// The arbiter's latest decisions (the last step that had any), for the overlay.
     @Published var raceDecisions: [Decision] = []
     @Published var showStateOverlay = true
+    /// What the arbiter was allowed to show on the latest step, and why (overlay).
+    @Published var raceBudget: Budget?
+    @Published var raceSituation: Capacity.Situation?
+    /// Minimal / Balanced / Coach for the race pipeline.
+    @Published var displaySetting: DisplaySetting = .balanced {
+        didSet { runEngine.displaySetting = displaySetting }
+    }
+    /// The slider's effort (0–100) in place of the measured one, once dragged in a race; nil = measured.
+    @Published var effortOverride: Double? {
+        didSet { runEngine.effortOverride = effortOverride }
+    }
 
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
     private let session = GlassesSession()
@@ -63,7 +76,8 @@ final class HUDController: ObservableObject {
 
     // Race pipeline: everything the race's GPS and watch sent goes through the
     // RunEngine (estimator → triggers → arbiter), updated at race run time.
-    private lazy var runEngine = RunEngine(plan: race.run.plan)
+    private lazy var runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting,
+                                                             effort: effortOverride)
     private var raceStarted = false
 
     // HR older than this is treated as missing and the engine falls back to its estimate.
@@ -274,15 +288,31 @@ final class HUDController: ObservableObject {
     func resetRace() {
         race.reset(profile: raceProfile)
         racePlaying = false
-        runEngine = RunEngine(plan: race.run.plan)
+        runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting, effort: effortOverride)
         raceStarted = false
         raceState = nil
         raceDecisions = []
+        raceBudget = nil
+        raceSituation = nil
         raceLabel = "—"
     }
 
     func toggleStateOverlay() {
         showStateOverlay.toggle()
+    }
+
+    /// Back to the measured effort for the budget.
+    func useMeasuredEffort() {
+        effortOverride = nil
+    }
+
+    /// A RunEngine with the controller's display setting and effort override applied.
+    static func makeRunEngine(plan: RunPlan, display: DisplaySetting, effort: Double?) -> RunEngine {
+        var config = RunEngine.Config()
+        config.display = display
+        var engine = RunEngine(plan: plan, config: config)
+        engine.effortOverride = effort
+        return engine
     }
 
     var raceTargetTime: TimeInterval { race.run.plan.targetTime }
@@ -384,11 +414,13 @@ final class HUDController: ObservableObject {
         let nextFrame: HUDFrame
         var raceState: RunState?
         var decisions: [Decision] = []
+        var budget: (Budget, Capacity.Situation)?
         if usesRunEngine {
             if raceStarted {
                 let step = runEngine.update(at: race.run.time)
                 raceState = step.state
                 decisions = step.decisions
+                budget = (step.budget, step.situation)
             }
             nextFrame = runEngine.frame()
         } else {
@@ -410,6 +442,8 @@ final class HUDController: ObservableObject {
             self.vitalsLabel = self.vitalsTag
             if self.vitalsMode == .race {
                 self.raceState = raceState
+                self.raceBudget = budget?.0
+                self.raceSituation = budget?.1
                 if !decisions.isEmpty { self.raceDecisions = decisions }
                 self.raceLabel = self.raceTag
                 self.racePlaying = self.race.isStreaming

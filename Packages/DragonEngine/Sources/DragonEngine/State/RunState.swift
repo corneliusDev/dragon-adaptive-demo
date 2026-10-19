@@ -2,7 +2,6 @@
 //  The estimator's answer to "where is the runner, how are they doing, and how
 //  much should we trust it": one value per state(at:) call. Metres, seconds,
 //  pace in seconds per metre; nil means unknown, never a stale guess.
-//  (MovementPhase — running / walking / stopped — arrives in chunk 6.)
 
 import Foundation
 
@@ -32,6 +31,11 @@ public enum CourseFeature: Sendable, Equatable {
 public struct Ahead: Sendable, Equatable {
     public var feature: CourseFeature
     public var meters: Double
+
+    public init(feature: CourseFeature, meters: Double) {
+        self.feature = feature
+        self.meters = meters
+    }
 }
 
 /// How far to trust the rest of RunState.
@@ -96,6 +100,12 @@ public struct RunState: Sendable, Equatable {
     public var grade: Double?
     public var ahead: Ahead?
     public var effort: MotionBand
+    /// The effort reading behind `effort` (0–100), averaged over a few seconds;
+    /// nil before any motion reading. Capacity reads this, not the band.
+    public var effortScore: Double?
+    /// Stopped, steady, surging, climbing or kicking (MovementPhaseClassifier).
+    public var phase: MovementPhase
+    /// Latest attention event while it lasts (StateEstimator.Tuning glance/dwell hold).
     public var attention: AttentionEvent
     public var quality: DataQuality
 
@@ -115,6 +125,8 @@ public struct RunState: Sendable, Equatable {
                 grade: Double? = nil,
                 ahead: Ahead? = nil,
                 effort: MotionBand = .stationary,
+                effortScore: Double? = nil,
+                phase: MovementPhase = .steady,
                 attention: AttentionEvent = .idle,
                 quality: DataQuality = DataQuality()) {
         self.elapsed = elapsed
@@ -132,6 +144,8 @@ public struct RunState: Sendable, Equatable {
         self.grade = grade
         self.ahead = ahead
         self.effort = effort
+        self.effortScore = effortScore
+        self.phase = phase
         self.attention = attention
         self.quality = quality
     }

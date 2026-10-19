@@ -2,7 +2,8 @@
 //  Debug overlay for a synthetic race: what the engine's state estimator makes
 //  of it — projected finish, gap to target, pace, heart rate — and how far to
 //  trust each (DataQuality) — and what the arbiter last decided about each
-//  cue, with its reason. Engine values are metres, seconds and s/m; turning
+//  cue, with its reason, under the capacity budget it had to fit. Engine
+//  values are metres, seconds and s/m; turning
 //  them into clocks and min/mi happens here.
 
 import SwiftUI
@@ -42,6 +43,14 @@ enum RunStateFormat {
         return "\(outcome) · \(d.key.name) · \(d.text)"
     }
 
+    /// "room for 2 · advisory and up · steady at race effort", plus "· GPS held" when inputs are distrusted.
+    static func budget(_ b: Budget, situation: Capacity.Situation) -> String {
+        let room = b.isEmpty ? "safety only" : "room for \(b.maxElements) · \(b.minPriority) and up"
+        let held = CueInput.allCases.filter { b.unreliable.contains($0) }
+            .map { $0 == .gps ? "GPS held" : "HR held" }
+        return ([room, situation.label] + held).joined(separator: " · ")
+    }
+
     /// Short labels for whatever DataQuality is flagging; empty when all is well.
     static func flags(_ q: DataQuality) -> [String] {
         var out: [String] = []
@@ -60,6 +69,9 @@ struct RunStateDebugView: View {
     let targetTime: TimeInterval
     /// The arbiter's latest decisions; shown under the state.
     var decisions: [Decision] = []
+    /// The capacity budget of the latest step.
+    var budget: Budget?
+    var situation: Capacity.Situation?
     private let amber = Color(red: 1, green: 0.54, blue: 0.24)
     private let phos = Color(red: 57 / 255, green: 226 / 255, blue: 122 / 255)
 
@@ -91,7 +103,11 @@ struct RunStateDebugView: View {
         row("HR", s.heartRate.map { "\(Int($0))" } ?? "—",
             "Z\(s.heartZone.map(String.init) ?? "—") · drift \(s.heartDrift.map { String(format: "%+.1f", $0) } ?? "—")")
         row("EFFORT", s.effort.label,
-            "grade \(s.grade.map { String(format: "%+.1f%%", $0 * 100) } ?? "—")")
+            "\(s.phase.rawValue) · grade \(s.grade.map { String(format: "%+.1f%%", $0 * 100) } ?? "—")")
+        if let budget, let situation {
+            row("BUDGET", budget.isEmpty ? "0" : "\(budget.maxElements)",
+                RunStateFormat.budget(budget, situation: situation))
+        }
         row("GPS", s.quality.gpsAccuracy.map { String(format: "±%.0f m", $0) } ?? "—",
             "fix \(age(s.quality.secondsSinceFix)) · HR \(age(s.quality.secondsSinceHeartRate))")
         let flags = RunStateFormat.flags(s.quality)

@@ -33,6 +33,12 @@ public enum CueKey: Sendable, Hashable {
     }
 }
 
+/// A reading a cue depends on. When the budget says it is unreliable the cue
+/// is held back.
+public enum CueInput: String, Sendable, Hashable, CaseIterable {
+    case gps, heartRate
+}
+
 /// A condition a cue waits for before it may show (chunk 9 holds a split
 /// until the top of a hill). A deferred cue still expires at its expiresAt.
 public enum Deferral: Sendable, Equatable {
@@ -97,10 +103,12 @@ public struct Cue: Sendable, Equatable {
     public var planGap: TimeInterval?
     /// Wait for this before showing; nil shows as soon as the arbiter allows.
     public var deferUntil: Deferral?
+    /// Readings this cue is only as good as; held back while any is unreliable.
+    public var needs: Set<CueInput>
 
     public init(key: CueKey, priority: Priority, reveal: Reveal = .auto, content: CueContent,
                 createdAt: TimeInterval, expiresAt: TimeInterval, minShow: TimeInterval,
-                planGap: TimeInterval? = nil, deferUntil: Deferral? = nil) {
+                planGap: TimeInterval? = nil, deferUntil: Deferral? = nil, needs: Set<CueInput> = []) {
         self.key = key
         self.priority = priority
         self.reveal = reveal
@@ -110,5 +118,6 @@ public struct Cue: Sendable, Equatable {
         self.minShow = minShow
         self.planGap = planGap
         self.deferUntil = deferUntil
+        self.needs = needs
     }
 }

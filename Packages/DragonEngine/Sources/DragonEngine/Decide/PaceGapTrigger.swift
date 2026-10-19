@@ -98,6 +98,7 @@ public struct PaceGapTrigger: Trigger {
                    createdAt: t,
                    expiresAt: t + config.expiresAfter,
                    minShow: config.minShow,
-                   planGap: gap)
+                   planGap: gap,
+                   needs: [.gps])
     }
 }

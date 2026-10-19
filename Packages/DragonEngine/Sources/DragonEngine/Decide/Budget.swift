@@ -1,8 +1,7 @@
 //  Budget.swift
 //  Stage 3 of the pipeline (Estimate → Trigger → Capacity → Arbiter → Render):
-//  how much the runner can take in right now. Chunk 6 computes it from
-//  effort, movement, terrain and attention; until then RunEngine passes the
-//  fixed `.steady` budget.
+//  how much the runner can take in right now. Capacity computes it from
+//  effort, movement, terrain, attention and data quality each tick.
 //
 //      Standing, or easy and steady        3 elements · info and up
 //      Steady at race effort               2 elements · advisory and up
@@ -20,11 +19,17 @@ public struct Budget: Sendable, Equatable {
     /// Whether a more important cue may cut short one that is still within its
     /// minimum time. When false it waits its turn; safety still interrupts.
     public var allowInterrupt: Bool
+    /// Inputs too poor to act on: a cue that needs one of them is held back
+    /// (not taken down if already showing). Safety cues are not exempt; a
+    /// safety cue shouldn't depend on data it can't trust.
+    public var unreliable: Set<CueInput>
 
-    public init(maxElements: Int, minPriority: Priority, allowInterrupt: Bool = true) {
+    public init(maxElements: Int, minPriority: Priority, allowInterrupt: Bool = true,
+                unreliable: Set<CueInput> = []) {
         self.maxElements = maxElements
         self.minPriority = minPriority
         self.allowInterrupt = allowInterrupt
+        self.unreliable = unreliable
     }
 
     public var isEmpty: Bool { maxElements <= 0 }
@@ -34,9 +39,14 @@ public struct Budget: Sendable, Equatable {
         priority == .safety || (!isEmpty && priority >= minPriority)
     }
 
+    /// The first input this cue needs that the budget can't trust, if any.
+    public func distrusted(_ cue: Cue) -> CueInput? {
+        CueInput.allCases.first { cue.needs.contains($0) && unreliable.contains($0) }
+    }
+
     /// Standing, or easy and steady.
     public static let relaxed = Budget(maxElements: 3, minPriority: .info)
-    /// Steady at race effort: RunEngine's fixed budget until chunk 6.
+    /// Steady at race effort.
     public static let steady = Budget(maxElements: 2, minPriority: .advisory)
     /// Hard effort or climbing.
     public static let strained = Budget(maxElements: 1, minPriority: .critical)

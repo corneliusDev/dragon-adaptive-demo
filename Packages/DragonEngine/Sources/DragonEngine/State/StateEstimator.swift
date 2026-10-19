@@ -22,7 +22,10 @@
 //                 dead band treats small deviations as noise: five minutes of
 //                 pace wobble says little about the next hour.
 //      vitals     device per reading from SourceSelection; HR older than 5 s
-//                 is missing, not the last value.
+//                 is missing, not the last value. effortScore is the chosen
+//                 device's motion averaged over 5 s.
+//      phase      MovementPhaseClassifier on the good fixes and the chosen
+//                 device's motion readings.
 //
 //  A pure value: ingest(_:) samples in time order, then ask state(at:) with
 //  the current run time. It never reads the clock.
@@ -58,6 +61,12 @@ public struct StateEstimator {
         /// How long a glance / dwell stays the current attention (matches AdaptiveEngine).
         public var glanceHold: TimeInterval = 1.5
         public var dwellHold: TimeInterval = 2.6
+        /// Seconds of motion readings averaged into effortScore.
+        public var effortWindow: TimeInterval = 5
+        /// Seconds of motion readings kept, for the kick's baseline.
+        public var effortHistory: TimeInterval = 240
+        /// Movement phase thresholds.
+        public var phase = MovementPhaseClassifier.Config()
 
         public init() {}
     }
@@ -79,6 +88,9 @@ public struct StateEstimator {
         let longitude: Double
         let altitude: Double?
         let offCourse: Bool
+        /// GradeModel factor where this fix was taken (1 when grade is unknown),
+        /// so the phase classifier can compare speeds as if flat.
+        var gradeFactor = 1.0
     }
 
     /// Good fixes from the last few minutes, oldest first.
@@ -93,6 +105,9 @@ public struct StateEstimator {
     private var watchCadence: SourceReading?
     private var phoneCadence: SourceReading?
     private var lastAttention: AttentionSample?
+    /// Motion readings from the last `effortHistory` seconds, per device, oldest first.
+    private var watchEfforts: [EffortSample] = []
+    private var phoneEfforts: [EffortSample] = []
 
     /// History kept, seconds: enough for the longest window.
     private var keep: TimeInterval { max(tuning.trendWindow, tuning.driftWindow) + 10 }
@@ -157,6 +172,7 @@ public struct StateEstimator {
 
         fixes.append(Fix(t: s.t, measured: measured, distance: distance, speed: s.speed, latitude: s.latitude,
                          longitude: s.longitude, altitude: s.altitude, offCourse: offCourse))
+        fixes[fixes.count - 1].gradeFactor = grade(at: distance).map(GradeModel.paceFactor) ?? 1
         if let first = fixes.first, s.t - first.t > keep {
             fixes.removeFirst(fixes.firstIndex { s.t - $0.t <= keep } ?? 0)
         }
@@ -177,8 +193,10 @@ public struct StateEstimator {
         if let m = s.motion {
             if watch {
                 StateEstimator.update(&watchMotion, value: m, sample: s)
+                append(&watchEfforts, EffortSample(t: s.timestamp, value: m))
             } else {
                 StateEstimator.update(&phoneMotion, value: m, sample: s)
+                append(&phoneEfforts, EffortSample(t: s.timestamp, value: m))
             }
         }
         if let c = s.cadence {
@@ -193,6 +211,16 @@ public struct StateEstimator {
     public mutating func ingest(_ s: AttentionSample) {
         if let last = lastAttention, s.t < last.t { return }
         lastAttention = s
+    }
+
+    /// Keeps a device's motion history in time order and about `effortHistory`
+    /// long (trimmed in batches, so appending stays cheap).
+    private func append(_ history: inout [EffortSample], _ e: EffortSample) {
+        if let last = history.last, e.t < last.t { return }
+        history.append(e)
+        if let first = history.first, e.t - first.t > tuning.effortHistory + 30 {
+            history.removeFirst(history.firstIndex { e.t - $0.t <= tuning.effortHistory } ?? 0)
+        }
     }
 
     private static func update(_ reading: inout SourceReading?, value: Double, sample s: VitalsSample) {
@@ -248,7 +276,17 @@ public struct StateEstimator {
         q.effortFallback = effortPick?.isFallback ?? false
         // Neither device fresh: hold the newest reading rather than invent "stationary".
         let newestMotion = [watchMotion, phoneMotion].compactMap { $0 }.max { $0.t < $1.t }
-        let effort = (effortPick?.reading ?? newestMotion).map { MotionBand(motion: $0.value) } ?? .stationary
+        let effortReading = effortPick?.reading ?? newestMotion
+        let effort = effortReading.map { MotionBand(motion: $0.value) } ?? .stationary
+        let efforts = effortReading.map { $0.source.isWatch ? watchEfforts : phoneEfforts } ?? []
+        let effortScore = effortReading.map { r in
+            MovementPhaseClassifier.mean(efforts, from: t - tuning.effortWindow, to: t) ?? r.value
+        }
+        let grade = last == nil ? nil : grade(at: distance)
+        let phase = MovementPhaseClassifier(config: tuning.phase).phase(
+            at: t, speeds: fixes.map { MovementSample(t: $0.t, distance: $0.distance, speed: $0.speed,
+                                                      gradeFactor: $0.gradeFactor) },
+            efforts: efforts, grade: grade, distance: distance, total: course?.totalDistance ?? plan.distanceMeters)
 
         let cadencePick = SourceSelection.cadence(phone: phoneCadence, watch: watchCadence, at: t)
         q.cadenceSource = cadencePick?.reading.source
@@ -266,9 +304,11 @@ public struct StateEstimator {
                         heartZone: hr.flatMap { plan.heartRateZones?.zone(for: $0.value) },
                         heartDrift: heartDrift(at: t),
                         cadence: cadencePick?.reading.value,
-                        grade: last == nil ? nil : grade(at: distance),
+                        grade: grade,
                         ahead: ahead(of: distance),
                         effort: effort,
+                        effortScore: effortScore,
+                        phase: phase,
                         attention: attention(at: t),
                         quality: q)
     }
@@ -305,7 +345,7 @@ public struct StateEstimator {
     }
 
     /// Least-squares slope of y on x; nil with no spread in x.
-    private static func slope(_ points: [(x: Double, y: Double)]) -> Double? {
+    static func slope(_ points: [(x: Double, y: Double)]) -> Double? {
         guard points.count >= 2 else { return nil }
         let n = Double(points.count)
         let mx = points.reduce(0) { $0 + $1.x } / n, my = points.reduce(0) { $0 + $1.y } / n

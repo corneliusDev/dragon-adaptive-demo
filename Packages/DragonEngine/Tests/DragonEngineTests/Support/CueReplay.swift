@@ -20,6 +20,9 @@ struct CueRace {
         let decisions: [Decision]
         /// Pace-gap trigger's direction after this step, if on.
         let paceGap: PaceGapTrigger.Direction?
+        /// What the arbiter was allowed to show, and the capacity row it came from.
+        let budget: Budget
+        let situation: Capacity.Situation
     }
 
     let profile: SyntheticProfile
@@ -54,7 +57,8 @@ func cueRace(_ profile: SyntheticProfile, seed: UInt64 = 42, config: RunEngine.C
         for event in run.advance(by: 1) { engine.ingest(event) }
         let step = engine.update(at: run.time)
         rows.append(.init(t: run.time, trueDistance: run.distance, state: step.state, proposed: step.proposed,
-                          current: step.current, decisions: step.decisions, paceGap: engine.paceGap.active))
+                          current: step.current, decisions: step.decisions, paceGap: engine.paceGap.active,
+                          budget: step.budget, situation: step.situation))
     }
     let race = CueRace(profile: profile, plan: run.plan, rows: rows, splits: engine.split.splits)
     cueRaceCache[key] = race

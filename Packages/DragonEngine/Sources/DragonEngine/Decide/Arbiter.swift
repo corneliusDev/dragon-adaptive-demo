@@ -4,7 +4,8 @@
 //  every decision:
 //
 //    1. Empty budget means nothing shows: only safety cues get through (and
-//       nothing under the budget's minPriority).
+//       nothing under the budget's minPriority). A cue that needs a reading
+//       the budget calls unreliable (GPS, heart rate) is held back too.
 //    2. Highest priority wins; ties go to the biggest gap from plan, then to
 //       the cue that has waited longest.
 //    3. Respect cooldowns: a key that just showed is held back for 90 s, and
@@ -47,6 +48,8 @@ public struct Decision: Sendable, Equatable {
         case budgetEmpty
         /// Under the budget's lowest allowed priority.
         case belowBudget(Priority)
+        /// Needs a reading that is unreliable right now.
+        case unreliable(CueInput)
         /// The same key showed recently.
         case coolingDown(until: TimeInterval)
         /// Waiting for its condition.
@@ -73,7 +76,7 @@ public struct Decision: Sendable, Equatable {
         public var outcome: Outcome {
             switch self {
             case .won, .interrupted, .onScreen: return .shown
-            case .budgetEmpty, .belowBudget, .coolingDown, .deferred, .outranked, .screenBusy: return .heldBack
+            case .budgetEmpty, .belowBudget, .unreliable, .coolingDown, .deferred, .outranked, .screenBusy: return .heldBack
             case .stale, .replaced, .finished, .cutShort, .dismissed, .budgetClosed: return .expired
             }
         }
@@ -103,6 +106,7 @@ public struct Decision: Sendable, Equatable {
         case .onScreen(let until): return "keeps the screen for its minimum time (\(secs(until - t)) more)"
         case .budgetEmpty: return "empty budget: only safety gets through"
         case .belowBudget(let p): return "budget allows \(p) and up"
+        case .unreliable(let input): return "\(input == .gps ? "GPS" : "heart rate") unreliable right now"
         case .coolingDown(let until): return "in its cooldown for \(secs(until - t)) more"
         case .deferred(let d):
             switch d {
@@ -213,6 +217,8 @@ public struct Arbiter: Sendable {
         for (i, cue) in waiting.enumerated() {
             if !budget.admits(cue.priority) {
                 held[i] = budget.isEmpty ? .budgetEmpty : .belowBudget(budget.minPriority)
+            } else if let input = budget.distrusted(cue) {
+                held[i] = .unreliable(input)
             } else if let until = cooldownUntil[cue.key], t < until {
                 held[i] = .coolingDown(until: until)
             } else if let wait = cue.deferUntil, !Arbiter.ready(wait, at: t, distance: distance) {
