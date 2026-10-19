@@ -37,6 +37,14 @@ public struct HeartRateZones: Sendable, Equatable, Codable {
                   boundaries: [0.85, 0.89, 0.94, 1.0].map { $0 * threshold })
     }
 
+    /// Five zones by heart rate reserve (Karvonen): zone tops at 60/70/80/90% of
+    /// the way from resting to max. The design's example runner (rest 52, max
+    /// 188) has zone 3 up to 161, zone 4 up to 174 and zone 5 above.
+    public static func reserve(resting: Double, threshold: Double, max: Double) -> HeartRateZones {
+        HeartRateZones(resting: resting, threshold: threshold, max: max,
+                       boundaries: [0.6, 0.7, 0.8, 0.9].map { resting + $0 * (max - resting) })
+    }
+
     public var zoneCount: Int { boundaries.count + 1 }
 
     /// 1-based zone for a heart rate.

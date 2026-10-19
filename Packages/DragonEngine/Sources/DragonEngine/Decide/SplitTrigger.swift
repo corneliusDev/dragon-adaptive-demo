@@ -10,7 +10,8 @@
 //  A split needs no reliable GPS: dead-reckoned distance carries it through
 //  an outage (the time is then an estimate, but the marker still passed).
 //  A marker that falls on one of the course's climbs is deferred to the crest
-//  (design: "splits deferred to the crest"): the budget allows only critical
+//  (design: "splits deferred to the crest"; TerrainAheadTrigger gives the
+//  warning before the same climbs): the budget allows only critical
 //  cues on a climb, so an advisory split shown there never would. Its expiry
 //  is pushed back by the time the rest of the climb takes, so it still shows
 //  once the runner is over the top and the budget opens again.

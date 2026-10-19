@@ -2,7 +2,9 @@
 //  What the runner's body is doing right now, from the speed series (GPS) and
 //  the motion effort score. One input to the capacity budget.
 //
-//      stopped   5 s speed under 0.8 m/s (or no speed and effort under 6)
+//      stopped   5 s speed under 0.8 m/s (or no speed and effort under 6), or
+//                before the run has any motion reading and too few fixes for a
+//                speed: at the gun, nothing yet says the runner is moving
 //      kick      in the last 400 m, with speed or effort rising above what the
 //                runner did over the 200 m before it. Two tests, either will do:
 //                  level  10 s speed ≥ 5% above, or 3 s effort ≥ 5 points above,
@@ -132,6 +134,7 @@ public struct MovementPhaseClassifier: Sendable {
            e < c.stoppedEffort {
             return .stopped
         }
+        if now == nil, efforts.isEmpty, speeds.count < 3 { return .stopped }
 
         if let total, total - distance <= c.kickDistance, isKicking(at: t, speeds: speeds, efforts: efforts, total: total) {
             return .kick

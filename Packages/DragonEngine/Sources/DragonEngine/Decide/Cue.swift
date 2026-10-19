@@ -26,7 +26,7 @@ public enum CueKey: Sendable, Hashable, Codable {
     case detail
     /// Before the start: the target and the plan.
     case target
-    /// Heart rate over its ceiling (chunk 9's trigger).
+    /// Heart rate over its ceiling.
     case heartCeiling
     /// A hill or sharp turn ahead, by where it starts (whole metres along the course).
     case terrain(at: Int)
@@ -119,6 +119,14 @@ public indirect enum CueText: Sendable, Equatable, Codable {
     case pace(Double, DistanceUnit)
     /// Metres, shown in the renderer's unit: 0.20 MI / 0.32 KM.
     case distance(Double)
+    /// A countdown: the time from now until this run time (never below 0:00).
+    /// Drawn from the run state of each frame, so it ticks while the cue is up.
+    case timeLeft(until: TimeInterval)
+    /// Metres from where the runner is now to this distance along the course,
+    /// in the renderer's unit; drawn live like `timeLeft`.
+    case distanceLeft(to: Double)
+    /// Seconds per mile or kilometre as a size of change: "5 SEC/MI".
+    case perUnit(TimeInterval, DistanceUnit)
     /// Several pieces on one line, separated by spaces.
     case phrase([CueText])
 }

@@ -4,8 +4,9 @@
 //  every decision:
 //
 //    1. Empty budget means nothing shows: only safety cues get through (and
-//       nothing under the budget's minPriority). A cue that needs a reading
-//       the budget calls unreliable (GPS, heart rate) is held back too.
+//       nothing under the budget's minPriority, except an answer to a glance or
+//       held look when the budget answers requests). A cue that needs a
+//       reading the budget calls unreliable (GPS, heart rate) is held back too.
 //    2. Highest priority wins; ties go to the biggest gap from plan, then to
 //       the cue that has waited longest.
 //    3. Respect cooldowns: a key that just showed is held back for 90 s, and
@@ -77,12 +78,16 @@ public struct Decision: Sendable, Equatable, Codable {
         /// Not safety, in the race's final stretch: dropped, never shown (the
         /// kick clock owns the last 400 m).
         case finalStretch
+        /// Its trigger took it down: what it was about is over (the kick clock
+        /// at the finish line).
+        case withdrawn
 
         public var outcome: Outcome {
             switch self {
             case .won, .interrupted, .onScreen: return .shown
             case .budgetEmpty, .belowBudget, .unreliable, .coolingDown, .deferred, .outranked, .screenBusy: return .heldBack
-            case .stale, .replaced, .finished, .cutShort, .dismissed, .budgetClosed, .finalStretch: return .expired
+            case .stale, .replaced, .finished, .cutShort, .dismissed, .budgetClosed, .finalStretch, .withdrawn:
+                return .expired
             }
         }
     }
@@ -128,6 +133,7 @@ public struct Decision: Sendable, Equatable, Codable {
         case .dismissed: return "dismissed by the runner"
         case .budgetClosed: return "budget no longer allows it"
         case .finalStretch: return "final 400 m: only safety until the finish"
+        case .withdrawn: return "taken down by its trigger: what it was about is over"
         }
     }
 }
@@ -193,6 +199,23 @@ public struct Arbiter: Sendable {
         return true
     }
 
+    /// Takes every cue with this key out of play, on screen or waiting: its
+    /// trigger says what it was about is over. Reported in the next decide's
+    /// decisions (as `.withdrawn`); no cooldown.
+    public mutating func withdraw(_ key: CueKey, at t: TimeInterval) {
+        if let c = showing, c.key == key {
+            showing = nil
+            pending.append(Decision(t: t, key: c.key, priority: c.priority, reason: .withdrawn))
+            pendingCues.append(c)
+        }
+        waiting.removeAll { cue in
+            guard cue.key == key else { return false }
+            pending.append(Decision(t: t, key: cue.key, priority: cue.priority, reason: .withdrawn))
+            pendingCues.append(cue)
+            return true
+        }
+    }
+
     /// Lets a waiting cue deferred `.released` show. No effect on anything else.
     public mutating func release(_ key: CueKey) {
         for i in waiting.indices where waiting[i].key == key && waiting[i].deferUntil == .released {
@@ -221,7 +244,7 @@ public struct Arbiter: Sendable {
             if t - shownAt >= c.minShow {
                 record(c, .finished)
                 showing = nil
-            } else if !budget.admits(c.priority) {
+            } else if !budget.admits(c) {
                 record(c, budget.finalStretch ? .finalStretch : .budgetClosed)
                 showing = nil
             } else if budget.finalStretch && c.priority != .safety {
@@ -257,7 +280,7 @@ public struct Arbiter: Sendable {
         // Rules 1, 3 and deferral: what may show at all.
         var held: [Int: Decision.Reason] = [:]
         for (i, cue) in waiting.enumerated() {
-            if !budget.admits(cue.priority) {
+            if !budget.admits(cue) {
                 held[i] = budget.isEmpty ? .budgetEmpty : .belowBudget(budget.minPriority)
             } else if let input = budget.distrusted(cue) {
                 held[i] = .unreliable(input)

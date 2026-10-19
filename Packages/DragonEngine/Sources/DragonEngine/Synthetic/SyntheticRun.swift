@@ -1,14 +1,18 @@
 //  SyntheticRun.swift
 //  A whole synthetic race from one seed: a virtual runner moves along the
 //  plan's course at the profile's pace, and we emit what an iPhone and Apple
-//  Watch would have sent — GPS at 1 Hz, HR ~1 Hz, motion ~10 Hz.
+//  Watch would have sent — GPS at 1 Hz, HR ~1 Hz, motion ~10 Hz, and the
+//  phone's pedometer cadence at 1 Hz — plus any glances the profile scripts.
 //
 //  Everything comes from one effort number, so the streams agree:
 //      pace   = plan pace × profile factor × grade slowdown × wobble
 //      effort = planEffort × (plan pace / pace) × climb cost × heat + fatigue
 //  A fade or a hill therefore shows up in GPS speed AND heart rate. HR and
 //  motion come from SyntheticVitalsGenerator (same first-order HR lag, jitter
-//  and dropouts as the stand-alone synthetic watch), fed this effort.
+//  and dropouts as the stand-alone synthetic watch), fed this effort (and the
+//  profile's heart-rate offset, 0 except in the walkthrough).
+//      cadence = athlete cadence × (plan pace / pace)^0.25 × (1 − form fade)
+//  with its own seeded noise, so adding it changed no other stream.
 //
 //  Clock-free and steppable: advance(by:) any amount; internally it always
 //  steps 1/20 s, so the samples don't depend on how the caller chunks time.
@@ -26,6 +30,12 @@ public struct SyntheticRun {
         public var startHR: Double = 110
         /// Effort (0–100) running the plan's pace on the flat.
         public var planEffort: Double = 80
+        /// Steps a minute at the plan's pace on the flat, and how strongly cadence
+        /// follows speed (cadence ∝ speed^this; most of a faster pace is stride).
+        public var cadence: Double = 172
+        public var cadenceSpeedExponent: Double = 0.25
+        /// Steps a minute of pedometer noise (standard deviation).
+        public var cadenceNoise: Double = 1
 
         public init() {}
     }
@@ -71,6 +81,11 @@ public struct SyntheticRun {
 
     private var vitals: SyntheticVitalsGenerator
     private var rng: SeededRNG
+    /// Cadence noise has its own generator, so the GPS and watch streams are
+    /// what they were before cadence was added.
+    private var cadenceRNG: SeededRNG
+    /// Scripted attention events not sent yet, by distance.
+    private var attention: [(distance: Double, event: AttentionEvent)]
     private var step = 0
     private var requested: TimeInterval = 0
     private var sentStartFix = false
@@ -98,6 +113,8 @@ public struct SyntheticRun {
         self.gps = gps
         self.course = plan.course!
         self.rng = SeededRNG(seed: seed)
+        self.cadenceRNG = SeededRNG(seed: seed &* 0x9E37_79B9_7F4A_7C15 &+ 7)
+        self.attention = profile.attention
         self.vitals = SyntheticVitalsGenerator(seed: seed &* 0x2545_F491_4F6C_DD1D &+ 1,
                                                restingHR: athlete.restingHR,
                                                maxHR: athlete.maxHR,
@@ -123,6 +140,7 @@ public struct SyntheticRun {
         if !sentStartFix {
             sentStartFix = true
             out.append(.location(fix()))
+            sendAttention(into: &out)
         }
         requested = max(requested, t)
         let rate = Double(SyntheticRun.stepsPerSecond)
@@ -187,7 +205,7 @@ public struct SyntheticRun {
         time = next
 
         let e = effort(pace: p, grade: g, at: distance, t: time)
-        if let sample = vitals.advance(by: dt, exertion: e) {
+        if let sample = vitals.advance(by: dt, exertion: e, heartOffset: profile.heartOffset(at: distance)) {
             // Stamp with the exact run time; the generator's own clock is a running float sum.
             // These are what the runner's Watch would send.
             out.append(.vitals(VitalsSample(timestamp: time, heartRate: sample.heartRate, motion: sample.motion,
@@ -197,6 +215,25 @@ public struct SyntheticRun {
         if step % SyntheticRun.stepsPerSecond == 0 {
             updateSlowState()
             if !gpsSilent { out.append(.location(fix(speed: 1 / p))) }
+            // The phone's pedometer keeps counting through a GPS outage.
+            out.append(.vitals(VitalsSample(timestamp: time, heartRate: nil, motion: nil,
+                                            cadence: cadence(pace: p, at: distance), source: .phone)))
+        }
+        sendAttention(into: &out)
+    }
+
+    /// Steps a minute at this pace and distance.
+    private mutating func cadence(pace p: Double, at d: Double) -> Double {
+        let relativeSpeed = plan.targetPace(at: d) / p
+        let c = athlete.cadence * pow(relativeSpeed, athlete.cadenceSpeedExponent) * (1 - profile.cadenceFade(at: d))
+        return (c + athlete.cadenceNoise * cadenceRNG.gaussian()).rounded()
+    }
+
+    /// The scripted attention events the runner has reached, at this run time.
+    private mutating func sendAttention(into out: inout [RunEvent]) {
+        while let next = attention.first, distance >= next.distance {
+            attention.removeFirst()
+            out.append(.attention(AttentionSample(t: time, event: next.event)))
         }
     }
 

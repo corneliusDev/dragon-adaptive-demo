@@ -18,7 +18,9 @@
 //  display gets sparser), and the Minimal / Balanced / Coach setting shifts it.
 //  The race's cue log (every arbiter decision, the runner's responses and the
 //  outcomes) replaces the flywheel count in RACE mode; when the race finishes
-//  it is saved to Documents/CueLogs as JSON lines and the review list opens.
+//  race time keeps running (at the race speed) so the result shows on the
+//  glasses for its 10 s and the display goes dark; then the log is saved to
+//  Documents/CueLogs as JSON lines and the review list opens.
 
 import Foundation
 import Combine
@@ -93,6 +95,14 @@ final class HUDController: ObservableObject {
                                                              name: "\(race.profile.name) seed \(race.seed)")
     private var raceStarted = false
     private var raceLogSaved = false
+    /// Told the engine the runner crossed the line.
+    private var raceFinishSent = false
+    /// Race seconds since the synthetic run finished (it stops sending there).
+    private var raceAfterFinish: TimeInterval = 0
+    /// Race seconds after the finish before the review opens: the result's 10 s, then a moment of dark.
+    private let reviewDelay: TimeInterval = 12
+    /// Race run time: the run's own until it finishes, then counting on.
+    private var raceTime: TimeInterval { race.run.time + raceAfterFinish }
     private var raceStartDate = Date()
     private let logStore = CueLogStore.documents
 
@@ -139,6 +149,11 @@ final class HUDController: ObservableObject {
             guard let self = self else { return }
             self.runEngine.ingest(.location(fix))
             self.raceStarted = true
+        }
+        race.onAttention = { [weak self] sample in
+            guard let self = self else { return }
+            print("[HUDController] race attention: \(sample.event) at \(Int(sample.t)) s")
+            self.runEngine.ingest(.attention(sample))
         }
 
         engine.onFlywheel = { [weak self] n in
@@ -297,6 +312,8 @@ final class HUDController: ObservableObject {
             if vitalsMode != .race { setVitalsMode(.race) }
             race.speed = raceSpeed
             race.start()
+            // The gun: the engine sees the runner standing at the line before the race clock moves.
+            pushImmediateFrame()
         }
         racePlaying = race.isStreaming
     }
@@ -308,6 +325,8 @@ final class HUDController: ObservableObject {
                                                 name: "\(raceProfile.name) seed \(race.seed)")
         raceStarted = false
         raceLogSaved = false
+        raceFinishSent = false
+        raceAfterFinish = 0
         raceStartDate = Date()
         raceLog = nil
         raceLogURL = nil
@@ -381,7 +400,7 @@ final class HUDController: ObservableObject {
     /// Attention reaches the race pipeline at race run time.
     private func receiveRaceAttention(_ event: AttentionEvent) {
         guard vitalsMode == .race, raceStarted else { return }
-        runEngine.ingest(.attention(AttentionSample(t: race.run.time, event: event)))
+        runEngine.ingest(.attention(AttentionSample(t: raceTime, event: event)))
     }
 
     /// A plan is loaded: the RunEngine drives the HUD.
@@ -478,13 +497,22 @@ final class HUDController: ObservableObject {
         var budget: (Budget, Capacity.Situation)?
         if usesRunEngine {
             if raceStarted {
-                let step = runEngine.update(at: race.run.time)
+                if race.run.isFinished, raceAfterFinish < 60 {
+                    raceAfterFinish += dt * raceSpeed
+                }
+                if race.run.isFinished && !raceFinishSent {
+                    raceFinishSent = true
+                    runEngine.finish(at: race.run.finishTime ?? race.run.time)
+                }
+                let step = runEngine.update(at: raceTime)
                 raceState = step.state
                 decisions = step.decisions
                 budget = (step.budget, step.situation)
-                if race.run.isFinished && !raceLogSaved {
+                if step.decisions.contains(where: { $0.outcome == .shown && $0.t == raceTime && $0.reason == .won }) {
+                    print("[HUDController] race cue at \(RunStateFormat.clock(raceTime)): \(runEngine.current.map { HUDController.cueTag($0, state: step.state) } ?? "—")")
+                }
+                if raceFinishSent && raceAfterFinish >= reviewDelay && !raceLogSaved {
                     raceLogSaved = true
-                    runEngine.finish(at: race.run.finishTime ?? race.run.time)
                     DispatchQueue.main.async {
                         self.saveRaceLog()
                         self.showCueLog = true
@@ -497,6 +525,7 @@ final class HUDController: ObservableObject {
         }
         let shownFrame = galleryFrame ?? nextFrame
         let cue = usesRunEngine ? runEngine.current : nil
+        let cueState = runEngine.state
         let log = usesRunEngine && raceStarted ? runEngine.log : nil
 
         DispatchQueue.main.async {
@@ -504,7 +533,7 @@ final class HUDController: ObservableObject {
             self.bandLabel = self.engine.band.label
             self.attnLabel = self.attnTag
             if self.usesRunEngine {
-                self.ctxLabel = cue.map(HUDController.cueTag) ?? "quiet"
+                self.ctxLabel = cue.map { HUDController.cueTag($0, state: cueState) } ?? "quiet"
             } else {
                 self.ctxLabel = self.engine.active.map {
                     "\($0.tag) · \($0.line1)"
@@ -527,10 +556,13 @@ final class HUDController: ObservableObject {
         }
     }
 
-    /// "MILE 3 · 8:14" for the telemetry row.
-    static func cueTag(_ cue: Cue) -> String {
+    /// "MILE 3 · 8:14" for the telemetry row; live pieces (the kick clock's
+    /// countdown) read from `state`.
+    static func cueTag(_ cue: Cue, state: RunState? = nil) -> String {
         let c = cue.content
-        return [c.heading ?? c.tag.map(CueText.label), c.main].compactMap { $0 }.map(CueFormat.string)
+        let now = state.map(CueFormat.Now.init)
+        return [c.heading ?? c.tag.map(CueText.label), c.main].compactMap { $0 }
+            .map { CueFormat.string($0, unit: .miles, now: now) }
             .joined(separator: " · ")
     }
 

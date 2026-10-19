@@ -91,6 +91,33 @@ final class RaceCueTests: XCTestCase {
         XCTAssertEqual(rebuilt.effortOverride, 95)
     }
 
+    func testWalkthroughThroughTheRaceSourceAnswersTheGlanceAtTheGunWithTheTarget() {
+        // The way HUDController wires it: the gun's samples (and the scripted glance)
+        // arrive before the race clock moves, and the engine updates at run time 0.
+        let source = SyntheticRaceSource(profile: .designWalkthrough, seed: 42)
+        var engine = HUDController.makeRunEngine(plan: source.run.plan, display: .balanced, effort: nil)
+        var glances: [AttentionSample] = []
+        source.onSample = { engine.ingest(.location($0)) }
+        source.onVitals = { engine.ingest(.vitals($0)) }
+        source.onAttention = { glances.append($0); engine.ingest(.attention($0)) }
+        source.step(by: 0)
+        let gun = engine.update(at: 0)
+        XCTAssertEqual(glances.map(\.event), [.glance])
+        XCTAssertEqual(gun.current?.key, .target)
+        XCTAssertEqual(HUDController.cueTag(gun.current!), "TARGET · 1:45:00")
+
+        // On to the quarter mile: the kick clock's tag counts down from the race state.
+        while engine.current?.key != .kickClock, !source.run.isFinished {
+            source.step(by: 1)
+            engine.update(at: source.run.time)
+        }
+        guard let kick = engine.current, let state = engine.state else { return XCTFail("no kick clock") }
+        let left = Int((source.run.plan.targetTime - state.elapsed).rounded())
+        XCTAssertEqual(HUDController.cueTag(kick, state: state),
+                       "TO BEAT 1:45:00 · " + String(format: "%d:%02d", left / 60, left % 60))
+        XCTAssertEqual(glances.map(\.event), [.glance, .glance, .dwell])
+    }
+
     func testBudgetTextSaysWhichInputsAreHeldBack() {
         var budget = Budget.steady
         budget.unreliable = [.gps, .heartRate]

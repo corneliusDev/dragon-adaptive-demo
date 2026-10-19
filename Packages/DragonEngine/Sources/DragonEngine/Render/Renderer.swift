@@ -4,7 +4,9 @@
 //  the design's screens, each with a reduced form for a budget of one element
 //  (or none: a safety cue still shows): just the value and its caption, bigger
 //  and sparser as effort rises. With no cue, the quiet screen: a dim status
-//  dot for a race, the dashboard or ambient read-out for the scripted demos.
+//  dot for a race (nothing at all once it's over), the dashboard or ambient
+//  read-out for the scripted demos. Live pieces of a cue (the kick clock's
+//  countdown, the distance to a hill) are drawn from the state given.
 //
 //  Everything drawn stays inside Display's safe zone, and every string is
 //  fitted to what the glasses accept (HUDText.fit: font 3 at most, and the
@@ -30,6 +32,8 @@ public struct RenderConfig: Sendable, Equatable {
 public enum QuietScreen: Sendable, Equatable {
     /// A race: darkness and a dim dot that says the engine is running.
     case statusDot
+    /// Nothing: the race is over and the glasses go dark.
+    case dark
     /// A scripted demo, standing still: the scenario's name and first rows.
     case dashboard(title: String, rows: [String])
     /// A scripted demo on the move: one big number, laid out by effort band.
@@ -47,17 +51,19 @@ public enum Renderer {
     }
 
     /// The frame for `cue` under `budget` (or the quiet screen when nil).
-    /// `state` sets the brightness (moderate without one); `unit` is for distances.
+    /// `state` sets the brightness (moderate without one) and the live text;
+    /// `unit` is for distances.
     public static func frame(for cue: Cue?, budget: Budget, state: RunState?, unit: DistanceUnit,
                              quiet: QuietScreen = .statusDot, config: RenderConfig = RenderConfig()) -> HUDFrame {
         frame(for: cue, form: form(for: budget, config: config), effort: state?.effort ?? .moderate,
-              unit: unit, quiet: quiet, config: config)
+              unit: unit, quiet: quiet, config: config, now: state.map(CueFormat.Now.init))
     }
 
     /// The same with the form chosen directly (the screen gallery shows both).
     public static func frame(for cue: Cue?, form: Form, effort: MotionBand, unit: DistanceUnit,
-                             quiet: QuietScreen = .statusDot, config: RenderConfig = RenderConfig()) -> HUDFrame {
-        var p = Painter(unit: unit)
+                             quiet: QuietScreen = .statusDot, config: RenderConfig = RenderConfig(),
+                             now: CueFormat.Now? = nil) -> HUDFrame {
+        var p = Painter(unit: unit, now: now)
         p.frame.add(.clear)
         p.frame.add(.luma(config.luma[min(effort.rawValue, config.luma.count - 1)]))
         guard let cue else {
@@ -89,11 +95,13 @@ public enum Renderer {
 /// Draws into a frame, fitting every string to the glasses.
 private struct Painter {
     let unit: DistanceUnit
+    let now: CueFormat.Now?
     var frame = HUDFrame()
     let cx = Display.cx
 
-    init(unit: DistanceUnit) {
+    init(unit: DistanceUnit, now: CueFormat.Now?) {
         self.unit = unit
+        self.now = now
     }
 
     // MARK: Text
@@ -108,7 +116,7 @@ private struct Painter {
 
     mutating func text(_ t: CueText?, x: Int? = nil, y: Int, font: HUDFont, color: UInt8, align: HUDAlign = .center) {
         guard let t else { return }
-        text(CueFormat.string(t, unit: unit), x: x ?? cx, y: y, font: font, color: color, align: align)
+        text(CueFormat.string(t, unit: unit, now: now), x: x ?? cx, y: y, font: font, color: color, align: align)
     }
 
     /// The boxed category label under a card.
@@ -203,6 +211,9 @@ private struct Painter {
         switch q {
         case .statusDot:
             frame.add(.circf(x: 270, y: 44, r: 3, color: 7))
+
+        case .dark:
+            break
 
         case .dashboard(let title, let rows):
             text(title, x: 24, y: 48, font: .small, color: 8, align: .left)

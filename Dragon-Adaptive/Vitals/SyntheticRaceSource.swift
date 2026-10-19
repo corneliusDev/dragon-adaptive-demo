@@ -1,8 +1,10 @@
 //  SyntheticRaceSource.swift
 //  A whole synthetic race (GPS + watch) for testing without going outside.
 //  Timer-driven wrapper around DragonEngine's pure SyntheticRun: the run
-//  decides what the phone and watch would send, this class decides when.
-//  `speed` plays it faster than real time (10x = ten race seconds per second).
+//  decides what the phone and watch would send (and any glances the profile
+//  scripts), this class decides when. `speed` plays it faster than real time
+//  (10x = ten race seconds per second). Starting from the line sends what was
+//  sent at the gun straight away, so the engine sees the runner standing there.
 
 import Foundation
 import DragonEngine
@@ -10,6 +12,8 @@ import DragonEngine
 final class SyntheticRaceSource: LocationSource {
     var onSample: ((LocationSample) -> Void)?
     var onVitals: ((VitalsSample) -> Void)?
+    /// Glances and held looks the profile scripts (the design walkthrough's).
+    var onAttention: ((AttentionSample) -> Void)?
 
     var speed: Double = 1               // simulated seconds per real second
     let seed: UInt64
@@ -29,6 +33,7 @@ final class SyntheticRaceSource: LocationSource {
     /// Starts or resumes the race from where stop() left it.
     func start() {
         guard timer == nil else { return }
+        if run.time == 0 { step(by: 0) }
 
         let t = Timer(timeInterval: tickInterval, repeats: true) { [weak self] _ in
             guard let self = self else { return }
@@ -56,7 +61,7 @@ final class SyntheticRaceSource: LocationSource {
             switch event {
             case .location(let fix): onSample?(fix)
             case .vitals(let sample): onVitals?(sample)
-            case .attention: break
+            case .attention(let a): onAttention?(a)
             }
         }
     }
