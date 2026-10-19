@@ -11,9 +11,25 @@ public enum CueFormat {
         string(text, unit: .miles)
     }
 
+    /// Where the runner is, for the live pieces (`.timeLeft`, `.distanceLeft`).
+    public struct Now: Sendable, Equatable {
+        public var elapsed: TimeInterval
+        public var distance: Double
+
+        public init(elapsed: TimeInterval, distance: Double) {
+            self.elapsed = elapsed
+            self.distance = distance
+        }
+
+        public init(_ s: RunState) {
+            self.init(elapsed: s.elapsed, distance: s.distance)
+        }
+    }
+
     /// The text for one piece of cue content. `unit` is for `.distance`;
-    /// markers and paces carry their own.
-    public static func string(_ text: CueText, unit: DistanceUnit) -> String {
+    /// markers and paces carry their own. `now` is where the runner is, for
+    /// the live pieces; without it they read "--".
+    public static func string(_ text: CueText, unit: DistanceUnit, now: Now? = nil) -> String {
         switch text {
         case .label(let s):
             return s
@@ -31,8 +47,16 @@ public enum CueFormat {
         case .distance(let meters):
             let n = max(0, meters) / unit.meters
             return String(format: n < 10 ? "%.2f %@" : "%.1f %@", n, unit == .miles ? "MI" : "KM")
+        case .timeLeft(let until):
+            guard let now else { return "--" }
+            return clock(max(0, until - now.elapsed))
+        case .distanceLeft(let to):
+            guard let now else { return "--" }
+            return string(.distance(max(0, to - now.distance)), unit: unit)
+        case .perUnit(let seconds, let unit):
+            return "\(Int(seconds.rounded())) SEC/\(unit == .miles ? "MI" : "KM")"
         case .phrase(let parts):
-            return parts.map { string($0, unit: unit) }.joined(separator: " ")
+            return parts.map { string($0, unit: unit, now: now) }.joined(separator: " ")
         }
     }
 

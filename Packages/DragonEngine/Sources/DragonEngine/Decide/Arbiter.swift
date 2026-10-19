@@ -4,8 +4,9 @@
 //  every decision:
 //
 //    1. Empty budget means nothing shows: only safety cues get through (and
-//       nothing under the budget's minPriority). A cue that needs a reading
-//       the budget calls unreliable (GPS, heart rate) is held back too.
+//       nothing under the budget's minPriority, except an answer to a glance or
+//       held look when the budget answers requests). A cue that needs a
+//       reading the budget calls unreliable (GPS, heart rate) is held back too.
 //    2. Highest priority wins; ties go to the biggest gap from plan, then to
 //       the cue that has waited longest.
 //    3. Respect cooldowns: a key that just showed is held back for 90 s, and
@@ -26,8 +27,8 @@ import Foundation
 
 /// What the arbiter did with one cue on one call, and why. Chunk 8's cue log
 /// keeps these.
-public struct Decision: Sendable, Equatable {
-    public enum Outcome: String, Sendable {
+public struct Decision: Sendable, Equatable, Codable {
+    public enum Outcome: String, Sendable, Codable, CaseIterable {
         /// On screen now (just went up, or still within its minimum time).
         case shown
         /// Still in play, not on screen; it may show on a later call.
@@ -36,7 +37,7 @@ public struct Decision: Sendable, Equatable {
         case expired
     }
 
-    public enum Reason: Sendable, Equatable {
+    public enum Reason: Sendable, Equatable, Codable {
         // Shown.
         /// The best cue the budget allows, and the screen was free.
         case won
@@ -77,12 +78,16 @@ public struct Decision: Sendable, Equatable {
         /// Not safety, in the race's final stretch: dropped, never shown (the
         /// kick clock owns the last 400 m).
         case finalStretch
+        /// Its trigger took it down: what it was about is over (the kick clock
+        /// at the finish line).
+        case withdrawn
 
         public var outcome: Outcome {
             switch self {
             case .won, .interrupted, .onScreen: return .shown
             case .budgetEmpty, .belowBudget, .unreliable, .coolingDown, .deferred, .outranked, .screenBusy: return .heldBack
-            case .stale, .replaced, .finished, .cutShort, .dismissed, .budgetClosed, .finalStretch: return .expired
+            case .stale, .replaced, .finished, .cutShort, .dismissed, .budgetClosed, .finalStretch, .withdrawn:
+                return .expired
             }
         }
     }
@@ -128,6 +133,7 @@ public struct Decision: Sendable, Equatable {
         case .dismissed: return "dismissed by the runner"
         case .budgetClosed: return "budget no longer allows it"
         case .finalStretch: return "final 400 m: only safety until the finish"
+        case .withdrawn: return "taken down by its trigger: what it was about is over"
         }
     }
 }
@@ -170,6 +176,11 @@ public struct Arbiter: Sendable {
     public private(set) var cooldownUntil: [CueKey: TimeInterval] = [:]
     /// Decisions made between calls (a dismissal), reported by the next decide.
     private var pending: [Decision] = []
+    private var pendingCues: [Cue] = []
+    /// The cue each of the last decide's decisions was about, in the same order.
+    /// A Decision names only the key, and two cues with one key can be in play
+    /// at once (one on screen, a newer one waiting); the cue log tells them apart.
+    public private(set) var decided: [Cue] = []
 
     public init(config: Config = Config()) {
         self.config = config
@@ -184,7 +195,25 @@ public struct Arbiter: Sendable {
         showing = nil
         cooldownUntil[c.key] = max(cooldownUntil[c.key] ?? 0, t + config.dismissedCooldown)
         pending.append(Decision(t: t, key: c.key, priority: c.priority, reason: .dismissed))
+        pendingCues.append(c)
         return true
+    }
+
+    /// Takes every cue with this key out of play, on screen or waiting: its
+    /// trigger says what it was about is over. Reported in the next decide's
+    /// decisions (as `.withdrawn`); no cooldown.
+    public mutating func withdraw(_ key: CueKey, at t: TimeInterval) {
+        if let c = showing, c.key == key {
+            showing = nil
+            pending.append(Decision(t: t, key: c.key, priority: c.priority, reason: .withdrawn))
+            pendingCues.append(c)
+        }
+        waiting.removeAll { cue in
+            guard cue.key == key else { return false }
+            pending.append(Decision(t: t, key: cue.key, priority: cue.priority, reason: .withdrawn))
+            pendingCues.append(cue)
+            return true
+        }
     }
 
     /// Lets a waiting cue deferred `.released` show. No effect on anything else.
@@ -201,17 +230,21 @@ public struct Arbiter: Sendable {
     public mutating func decide(_ candidates: [Cue], budget: Budget, at t: TimeInterval,
                                 distance: Double? = nil) -> (showing: Cue?, decisions: [Decision]) {
         var out = pending
+        var cues = pendingCues
         pending = []
+        pendingCues = []
         func record(_ c: Cue, _ reason: Decision.Reason) {
             out.append(Decision(t: t, key: c.key, priority: c.priority, reason: reason))
+            cues.append(c)
         }
+        defer { decided = cues }
 
         // Rule 4 (end of it) and rule 1 for the cue on screen.
         if let c = showing {
             if t - shownAt >= c.minShow {
                 record(c, .finished)
                 showing = nil
-            } else if !budget.admits(c.priority) {
+            } else if !budget.admits(c) {
                 record(c, budget.finalStretch ? .finalStretch : .budgetClosed)
                 showing = nil
             } else if budget.finalStretch && c.priority != .safety {
@@ -247,7 +280,7 @@ public struct Arbiter: Sendable {
         // Rules 1, 3 and deferral: what may show at all.
         var held: [Int: Decision.Reason] = [:]
         for (i, cue) in waiting.enumerated() {
-            if !budget.admits(cue.priority) {
+            if !budget.admits(cue) {
                 held[i] = budget.isEmpty ? .budgetEmpty : .belowBudget(budget.minPriority)
             } else if let input = budget.distrusted(cue) {
                 held[i] = .unreliable(input)

@@ -87,12 +87,14 @@ public struct SyntheticVitalsGenerator {
     /// Same as advance(by:), but with the exertion (0–100) at the end of the
     /// step supplied by the caller instead of the built-in 40 s loop. This is
     /// how SyntheticRun drives HR and motion from a runner's pace and grade.
-    public mutating func advance(by dt: Double, exertion effort: Double) -> VitalsSample? {
+    /// `heartOffset` (bpm) moves the heart rate the effort calls for without
+    /// touching motion: cardiac drift, heat, a surge the legs don't show yet.
+    public mutating func advance(by dt: Double, exertion effort: Double, heartOffset: Double = 0) -> VitalsSample? {
         elapsed += dt
         let effort = max(0, min(100, effort))
 
         // HR keeps responding to effort even while the watch isn't sending.
-        let target = restingHR + (maxHR - restingHR) * effort / 100
+        let target = restingHR + (maxHR - restingHR) * effort / 100 + heartOffset
         hr += (target - hr) * min(1, dt / hrTimeConstant)
 
         // Roughly one 2–5s outage per minute.

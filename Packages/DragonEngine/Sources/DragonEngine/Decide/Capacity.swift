@@ -3,6 +3,7 @@
 //  how much the runner can take in right now, as a Budget. The design's table,
 //  first matching row wins:
 //
+//      Across the line (finish(at:))       3 elements · info and up (the result)
 //      Final 400 m of the race             nothing except safety ("only the kick clock")
 //      Surge, final kick, technical turn   nothing except safety
 //      Hard effort or climbing             1 element  · critical and up
@@ -14,6 +15,8 @@
 //      runner glanced       +1 element for 1.5 s
 //      runner held a look   +2 elements for 2.6 s
 //      GPS / heart rate     unreliable → cues that need it are held back
+//      a glance's answer    shows below the row's priority ("ask and it
+//                           answers"), except in the safety-only rows
 //
 //  The setting and attention only move maxElements, never below 0, and never
 //  the row's minPriority: Coach during a kick is one element, still safety only.
@@ -31,7 +34,7 @@
 import Foundation
 
 /// How chatty the glasses should be, set before the run.
-public enum DisplaySetting: String, Sendable, Equatable, CaseIterable {
+public enum DisplaySetting: String, Sendable, Equatable, Codable, CaseIterable {
     case minimal, balanced, coach
 
     /// Elements added to (or taken from) every budget.
@@ -64,6 +67,10 @@ public struct CapacityConfig: Sendable, Equatable {
     /// GPS counts as unreliable with no fix in this many seconds, or one this inaccurate (metres).
     public var gpsStaleAfter: TimeInterval = 5
     public var gpsMaxAccuracy = 20.0
+    /// Whether a cue answering a glance or held look (reveal .glance / .dwell)
+    /// may show below the row's lowest priority. Never in the safety-only rows
+    /// (surge, kick, technical turn, final stretch).
+    public var answerRequests = true
 
     /// The table's rows.
     public var relaxed = Budget.relaxed
@@ -103,8 +110,10 @@ public struct AttentionWindow: Sendable, Equatable {
 
 public struct Capacity: Sendable {
     /// Which row of the table applies.
-    public enum Situation: String, Sendable, Equatable {
+    public enum Situation: String, Sendable, Equatable, Codable, CaseIterable {
         case standing, easy, raceEffort, hardEffort, climbing, surge, kick, technicalTurn, finalStretch
+        /// Across the finish line: room for the result.
+        case finished
 
         /// Words for the debug overlay.
         public var label: String {
@@ -118,6 +127,7 @@ public struct Capacity: Sendable {
             case .kick: return "final kick"
             case .technicalTurn: return "technical turn"
             case .finalStretch: return "final stretch"
+            case .finished: return "finished"
             }
         }
     }
@@ -128,6 +138,8 @@ public struct Capacity: Sendable {
     /// finish, which then has no final stretch.
     public let raceDistance: Double?
     public private(set) var attention = AttentionWindow()
+    /// Run time the runner crossed the line, once told (finish(at:)).
+    public private(set) var finishedAt: TimeInterval?
 
     public init(config: CapacityConfig = CapacityConfig(), setting: DisplaySetting = .balanced,
                 raceDistance: Double? = nil) {
@@ -142,6 +154,11 @@ public struct Capacity: Sendable {
         return total - distance <= config.finalStretch
     }
 
+    /// The runner is across the line: the race's rows give way to the finished one.
+    public mutating func finish(at t: TimeInterval) {
+        finishedAt = t
+    }
+
     /// An attention event from the glasses, at its run time.
     public mutating func note(_ sample: AttentionSample) {
         attention.note(sample.event, at: sample.t, config: config)
@@ -149,6 +166,7 @@ public struct Capacity: Sendable {
 
     /// The row for this state. `effort` overrides state.effortScore (the app's slider).
     public func situation(for s: RunState, effort: Double? = nil) -> Situation {
+        if finishedAt != nil { return .finished }
         if inFinalStretch(s.distance) { return .finalStretch }
         if case .turn? = s.ahead?.feature, let m = s.ahead?.meters, m <= config.technicalTurnAhead {
             return .technicalTurn
@@ -169,16 +187,21 @@ public struct Capacity: Sendable {
     /// The budget at run time `t` for this state.
     public func budget(for s: RunState, at t: TimeInterval, effort: Double? = nil) -> Budget {
         var b: Budget
+        var safetyRow = false
         switch situation(for: s, effort: effort) {
         case .finalStretch:
             b = config.safetyOnly
             b.finalStretch = true
-        case .technicalTurn, .kick, .surge: b = config.safetyOnly
+            safetyRow = true
+        case .technicalTurn, .kick, .surge:
+            b = config.safetyOnly
+            safetyRow = true
         case .hardEffort, .climbing: b = config.strained
-        case .standing, .easy: b = config.relaxed
+        case .standing, .easy, .finished: b = config.relaxed
         case .raceEffort: b = config.steady
         }
         b.maxElements = max(0, b.maxElements + setting.shift + attention.bonus(at: t, config: config))
+        b.answersRequests = config.answerRequests && !safetyRow
         b.unreliable = unreliable(s.quality)
         return b
     }

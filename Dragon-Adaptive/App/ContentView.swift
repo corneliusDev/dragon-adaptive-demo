@@ -47,6 +47,11 @@ struct ContentView: View {
         }
         #endif
         .sheet(isPresented: $showCourseDebug) { CourseDebugView() }
+        .sheet(isPresented: $hud.showCueLog) {
+            if let log = hud.raceLog {
+                CueLogView(log: log, fileURL: hud.raceLogURL)
+            }
+        }
         #if DEBUG
         .sheet(isPresented: $showGallery, onDismiss: { hud.resumeLiveHUD() }) { ScreenGalleryView(hud: hud) }
         #endif
@@ -129,6 +134,9 @@ struct ContentView: View {
                     .background(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.22)))
             }
             Text(hud.raceLabel).font(.system(size: 12, design: .monospaced)).foregroundColor(amber)
+            Button("CUE LOG") { hud.openCueLog() }
+                .font(.system(size: 11, design: .monospaced)).foregroundColor(phos)
+                .accessibilityIdentifier("cueLogButton")
             #if DEBUG
             HStack(spacing: 10) {
                 Text("DISPLAY").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
@@ -216,7 +224,12 @@ struct ContentView: View {
             Divider().background(Color(white: 0.15))
             row("CONTEXT", hud.ctxLabel, phos)
             Divider().background(Color(white: 0.15))
-            row("FLYWHEEL", "\(hud.flywheel)  tuples", phos)
+            if hud.vitalsMode == .race {
+                // The cue log replaces the flywheel count in a race.
+                row("CUE LOG", hud.raceLog.map { CueLogFormat.counts($0.summary) } ?? "0 shown · 0 held back", phos)
+            } else {
+                row("FLYWHEEL", "\(hud.flywheel)  tuples", phos)
+            }
         }
         .padding(.vertical, 4)
         .background(RoundedRectangle(cornerRadius: 8).stroke(Color(white: 0.18)))

@@ -4,10 +4,10 @@
 
 import Foundation
 
-public enum Reveal: Sendable { case glance, auto, dwell }   // auto = engine forces (safety-critical)
+public enum Reveal: Sendable, Codable { case glance, auto, dwell }   // auto = engine forces (safety-critical)
 /// A small drawing above a card's value. hill, flag and gauge are the pace
 /// engine's terrain, finish and form screens.
-public enum Glyph: Sendable, CaseIterable { case arrow, warn, drop, clock, hill, flag, gauge, none }
+public enum Glyph: Sendable, Codable, CaseIterable { case arrow, warn, drop, clock, hill, flag, gauge, none }
 
 public struct ContextCard {
     public let id: String
