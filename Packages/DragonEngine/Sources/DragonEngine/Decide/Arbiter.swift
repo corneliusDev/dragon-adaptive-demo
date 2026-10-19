@@ -141,8 +141,22 @@ public struct Arbiter: Sendable {
         /// Seconds a key is held back after the runner dismissed it, counted from
         /// the dismissal. Longer than `cooldown`: they said they don't want it.
         public var dismissedCooldown: TimeInterval = 180
+        /// The scripted demos' rule in place of rule 4: a cue proposed on this call
+        /// takes the screen whatever is up and whatever its priority, the way the
+        /// demo cards always replaced each other (re-proposing the cue on screen
+        /// restarts it). Rules 1, 3 and 5 still apply. Off for races.
+        public var newestWins = false
 
         public init() {}
+
+        /// For ScriptedTrigger's demo cards: no cooldowns, the newest card wins.
+        public static var scripted: Config {
+            var c = Config()
+            c.cooldown = 0
+            c.dismissedCooldown = 0
+            c.newestWins = true
+            return c
+        }
     }
 
     public let config: Config
@@ -244,19 +258,26 @@ public struct Arbiter: Sendable {
             }
         }
 
-        // Rule 2: the best of the rest.
+        // Rule 2: the best of the rest (scripted: the best of this call's proposals, if any may show).
+        let proposed = Set(candidates.map(\.key))       // one waiting cue per key: the newest
         var best: Int?
         for i in waiting.indices where held[i] == nil {
             if best.map({ Arbiter.outranks(waiting[i], waiting[$0]) }) ?? true { best = i }
         }
+        if config.newestWins, let newest = waiting.indices.filter({ proposed.contains(waiting[$0].key) && held[$0] == nil })
+            .reduce(nil as Int?, { b, i in b.map { Arbiter.outranks(waiting[i], waiting[$0]) ? i : $0 } ?? i }) {
+            best = newest
+        }
 
-        // Rule 4: the cue on screen keeps it unless the best is more important.
+        // Rule 4: the cue on screen keeps it unless the best is more important
+        // (scripted: unless the best was proposed on this call).
         var winner: Int?
         if let b = best {
             if let c = showing {
                 let more = waiting[b].priority > c.priority
-                if more && (budget.allowInterrupt || waiting[b].priority == .safety) {
-                    record(c, .cutShort(by: waiting[b].key))
+                let newest = config.newestWins && proposed.contains(waiting[b].key)
+                if newest || (more && (budget.allowInterrupt || waiting[b].priority == .safety)) {
+                    record(c, c.key == waiting[b].key ? .replaced : .cutShort(by: waiting[b].key))
                     winner = b
                     held[b] = .interrupted(c.key)
                 } else {

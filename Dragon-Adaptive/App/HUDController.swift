@@ -62,6 +62,9 @@ final class HUDController: ObservableObject {
     @Published var displaySetting: DisplaySetting = .balanced {
         didSet { runEngine.displaySetting = displaySetting }
     }
+    /// A screen from the gallery held on the mirror and the glasses in place of
+    /// the live HUD; nil = live.
+    @Published private(set) var galleryFrame: HUDFrame?
     /// The slider's effort (0–100) in place of the measured one, once dragged in a race; nil = measured.
     @Published var effortOverride: Double? {
         didSet { runEngine.effortOverride = effortOverride }
@@ -301,6 +304,26 @@ final class HUDController: ObservableObject {
         showStateOverlay.toggle()
     }
 
+    // MARK: - Screen gallery
+
+    /// Holds `frame` on the mirror and sends it to the glasses (if connected)
+    /// until resumeLiveHUD().
+    func showOnGlasses(_ frame: HUDFrame) {
+        print("[HUDController] gallery frame with \(frame.ops.count) ops")
+        galleryFrame = frame
+        backend?.invalidate()
+        pushImmediateFrame()
+    }
+
+    func resumeLiveHUD() {
+        guard galleryFrame != nil else { return }
+        galleryFrame = nil
+        backend?.invalidate()
+        pushImmediateFrame()
+    }
+
+    var glassesConnected: Bool { backend != nil }
+
     /// Back to the measured effort for the budget.
     func useMeasuredEffort() {
         effortOverride = nil
@@ -426,10 +449,11 @@ final class HUDController: ObservableObject {
         } else {
             nextFrame = legacyFrame
         }
+        let shownFrame = galleryFrame ?? nextFrame
         let cue = usesRunEngine ? runEngine.current : nil
 
         DispatchQueue.main.async {
-            self.frame = nextFrame
+            self.frame = shownFrame
             self.bandLabel = self.engine.band.label
             self.attnLabel = self.attnTag
             if self.usesRunEngine {
@@ -451,7 +475,7 @@ final class HUDController: ObservableObject {
         }
 
         if !showCalibrationOnConnect {
-            backend?.apply(nextFrame)
+            backend?.apply(shownFrame)
         }
     }
 

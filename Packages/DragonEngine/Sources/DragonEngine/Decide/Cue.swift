@@ -20,6 +20,26 @@ public enum CueKey: Sendable, Hashable {
     case split(marker: Int, unit: DistanceUnit)
     /// Behind or ahead of target; one key either way, so the cooldown is shared.
     case paceGap
+    /// A glance's answer: projected finish against the target.
+    case status
+    /// A held look's answer: recent splits and the pace still needed.
+    case detail
+    /// Before the start: the target and the plan.
+    case target
+    /// Heart rate over its ceiling (chunk 9's trigger).
+    case heartCeiling
+    /// A hill or sharp turn ahead, by where it starts (whole metres along the course).
+    case terrain(at: Int)
+    /// The `n`th fuel stop of the plan (1-based).
+    case fuel(Int)
+    /// Cadence fading with heart rate drifting up.
+    case formFade
+    /// The last stretch: time left to beat the target.
+    case kickClock
+    /// Across the line.
+    case finish
+    /// A hand-authored Scenario card (the cycling and SOF demos), by card id.
+    case scripted(String)
 
     public static func split(mile: Int) -> CueKey { .split(marker: mile, unit: .miles) }
     public static func split(kilometer: Int) -> CueKey { .split(marker: kilometer, unit: .kilometers) }
@@ -29,8 +49,43 @@ public enum CueKey: Sendable, Hashable {
         switch self {
         case .split(let n, let unit): return "\(unit == .miles ? "mile" : "km") \(n) split"
         case .paceGap: return "pace gap"
+        case .status: return "status"
+        case .detail: return "split table"
+        case .target: return "target"
+        case .heartCeiling: return "heart rate"
+        case .terrain(let m): return "terrain at \(m) m"
+        case .fuel(let n): return "fuel \(n)"
+        case .formFade: return "form fade"
+        case .kickClock: return "kick clock"
+        case .finish: return "finish"
+        case .scripted(let id): return "\(id) card"
         }
     }
+
+    /// Which layout the renderer draws it with.
+    public var kind: CueKind {
+        switch self {
+        case .split: return .split
+        case .paceGap: return .paceGap
+        case .status: return .status
+        case .detail: return .detail
+        case .target: return .target
+        case .heartCeiling: return .heartCeiling
+        case .terrain: return .terrain
+        case .fuel: return .fuel
+        case .formFade: return .formFade
+        case .kickClock: return .kickClock
+        case .finish: return .finish
+        case .scripted: return .scripted
+        }
+    }
+}
+
+/// The kinds of cue, one renderer layout each (the design's screens).
+public enum CueKind: String, Sendable, CaseIterable {
+    case split, paceGap, status, detail, target, heartCeiling, terrain, fuel, formFade, kickClock, finish
+    /// A Scenario card from the cycling / SOF demos.
+    case scripted
 }
 
 /// A reading a cue depends on. When the budget says it is unreliable the cue
@@ -62,8 +117,21 @@ public indirect enum CueText: Sendable, Equatable {
     case gap(TimeInterval)
     /// Seconds per metre, shown per mile or kilometre: 7:53 / MI.
     case pace(Double, DistanceUnit)
+    /// Metres, shown in the renderer's unit: 0.20 MI / 0.32 KM.
+    case distance(Double)
     /// Several pieces on one line, separated by spaces.
     case phrase([CueText])
+}
+
+/// One row of a table (the held look's recent splits): a label and its value.
+public struct CueRow: Sendable, Equatable {
+    public var label: CueText
+    public var value: CueText
+
+    public init(_ label: CueText, _ value: CueText) {
+        self.label = label
+        self.value = value
+    }
 }
 
 /// What a cue shows, top to bottom.
@@ -77,13 +145,20 @@ public struct CueContent: Sendable, Equatable {
     /// Small boxed category label ("SPLIT"); dropped when the subtitle needs the room.
     public var tag: String?
     public var icon: Glyph
+    /// Rows of a table above the value (the held look's splits); empty for most cues.
+    public var rows: [CueRow]
+    /// Small dim line at the bottom ("GLANCE FOR STATUS").
+    public var footer: CueText?
 
-    public init(heading: CueText? = nil, main: CueText, subtitle: [CueText] = [], tag: String? = nil, icon: Glyph = .none) {
+    public init(heading: CueText? = nil, main: CueText, subtitle: [CueText] = [], tag: String? = nil,
+                icon: Glyph = .none, rows: [CueRow] = [], footer: CueText? = nil) {
         self.heading = heading
         self.main = main
         self.subtitle = subtitle
         self.tag = tag
         self.icon = icon
+        self.rows = rows
+        self.footer = footer
     }
 }
 

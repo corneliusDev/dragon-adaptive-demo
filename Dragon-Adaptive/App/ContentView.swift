@@ -5,6 +5,7 @@ import DragonEngine
 struct ContentView: View {
     @StateObject private var hud = HUDController()
     @State private var showCourseDebug = false
+    @State private var showGallery = false
     private let amber = Color(red: 1, green: 0.54, blue: 0.24)
     private let phos  = Color(red: 57/255, green: 226/255, blue: 122/255)
     private let bench = Color(red: 0.06, green: 0.08, blue: 0.075)
@@ -23,8 +24,12 @@ struct ContentView: View {
                 Text("The engine decides what to surface and what to hide from motion + attention + context. Faster motion → fewer elements, bigger glyphs. Safety-critical context surfaces unprompted.")
                     .font(.system(size: 12)).foregroundColor(.gray).padding(.horizontal, 4)
                 #if DEBUG
-                Button("COURSE DEBUG") { showCourseDebug = true }
-                    .font(.system(size: 11, design: .monospaced)).foregroundColor(.gray)
+                HStack(spacing: 18) {
+                    Button("COURSE DEBUG") { showCourseDebug = true }
+                    Button("SCREEN GALLERY") { showGallery = true }
+                        .accessibilityIdentifier("screenGalleryButton")
+                }
+                .font(.system(size: 11, design: .monospaced)).foregroundColor(.gray)
                 #endif
             }
             .padding(16)
@@ -42,6 +47,9 @@ struct ContentView: View {
         }
         #endif
         .sheet(isPresented: $showCourseDebug) { CourseDebugView() }
+        #if DEBUG
+        .sheet(isPresented: $showGallery, onDismiss: { hud.resumeLiveHUD() }) { ScreenGalleryView(hud: hud) }
+        #endif
     }
 
     private var header: some View {

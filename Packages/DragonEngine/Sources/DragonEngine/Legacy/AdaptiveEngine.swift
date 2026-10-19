@@ -1,6 +1,10 @@
 //  AdaptiveEngine.swift
-//  Safe-zone adaptive HUD layout for real ActiveLook glasses.
-//  UI- and device-agnostic: emits HUDOps and consumes AttentionEvents.
+//  The scenario demos (cycling / SOF) on the pipeline: a thin adapter that
+//  keeps today's API for the app and the characterisation tests. The cards
+//  are proposed by ScriptedTrigger, chosen by an Arbiter with the scripted
+//  rules (newest card wins, no cooldowns), and drawn by Renderer; what is left
+//  here is the demo's own state: the motion reading, the heart rate estimate,
+//  the attention read-out and the flywheel count.
 //  Clock-free: every call that cares about time takes run time `t`
 //  (seconds since run start, monotonic) from the caller.
 
@@ -29,7 +33,15 @@ public enum MotionBand: Int, Sendable {
 }
 
 public final class AdaptiveEngine {
-    public private(set) var scenario: Scenario
+    /// The demos have no capacity model: every card gets its full layout.
+    public static let budget = Budget.relaxed
+    /// Seconds a glance / a held look stays the attention read-out.
+    public static let glanceHold: TimeInterval = 1.5
+    public static let dwellHold: TimeInterval = 2.6
+
+    public private(set) var trigger: ScriptedTrigger
+    public private(set) var arbiter = Arbiter(config: .scripted)
+    public var scenario: Scenario { trigger.scenario }
     public var motion: Double = 0
 
     /// Latest real HR reading, or nil when none is fresh.
@@ -40,206 +52,95 @@ public final class AdaptiveEngine {
 
     public private(set) var attention: AttentionEvent = .idle
     private var attnUntil: TimeInterval?          // run time when attention falls back to idle
+    private var lastT: TimeInterval = 0
 
-    public private(set) var active: ContextCard?
-    private var activeUntil: TimeInterval = 0     // run time when the active card times out
-    private var seen = Set<String>()
-
-    public var running = false
-    public private(set) var clock: Double = 0     // scenario seconds, loops at 40
+    /// Cards shown for their full time (the flywheel the cue log will replace).
     public private(set) var flywheel = 0
     public var onFlywheel: ((Int) -> Void)?
 
     public init(scenario: Scenario) {
-        self.scenario = scenario
+        trigger = ScriptedTrigger(scenario: scenario)
     }
 
     public var band: MotionBand { MotionBand(motion: motion) }
 
+    public var running: Bool {
+        get { trigger.running }
+        set { trigger.running = newValue }
+    }
+
+    /// Scenario seconds, loops at 40.
+    public var clock: Double { trigger.clock }
+
+    /// The card on screen.
+    public var active: ContextCard? { trigger.card(for: arbiter.showing?.key) }
+
     public func setScenario(_ s: Scenario) {
         reset()
-        scenario = s
+        trigger.reset(to: s)
     }
 
     public func reset() {
         attention = .idle
         attnUntil = nil
-
-        active = nil
-        activeUntil = 0
-        seen = []
-
+        arbiter = Arbiter(config: .scripted)
         flywheel = 0
-        running = false
-        clock = 0
+        trigger.reset()
     }
 
     // MARK: - Attention
 
-    /// Applies an attention event that arrived at run time `t`.
+    /// Applies an attention event that arrived at run time `t`: a glance or a
+    /// held look puts up the card that answers it straight away.
     public func handle(_ e: AttentionEvent, at t: TimeInterval) {
         attention = e
-
-        guard e == .glance || e == .dwell else {
-            return
-        }
-
-        attnUntil = t + (e == .dwell ? 2.6 : 1.5)
-
-        let want: [Reveal] = e == .dwell ? [.dwell, .glance] : [.glance]
-
-        if let cue = scenario.cards.first(where: { want.contains($0.reveal) && $0.window.contains(clock) })
-            ?? scenario.cards.first(where: { want.contains($0.reveal) && !seen.contains($0.id) }) {
-            surface(cue, drilled: e == .dwell, at: t)
-        }
-    }
-
-    private func surface(_ c: ContextCard, drilled: Bool, at t: TimeInterval) {
-        active = c
-        activeUntil = t + (drilled ? 8 : 5)
-        seen.insert(c.id)
-    }
-
-    private func autoScan(at t: TimeInterval) {
-        for c in scenario.cards where c.reveal == .auto && c.window.contains(clock) {
-            if active?.id != c.id {
-                surface(c, drilled: false, at: t)
-                attention = .idle
-            }
+        guard e == .glance || e == .dwell else { return }
+        attnUntil = t + (e == .dwell ? AdaptiveEngine.dwellHold : AdaptiveEngine.glanceHold)
+        if let cue = trigger.request(e, at: t) {
+            _ = arbiter.decide([cue], budget: AdaptiveEngine.budget, at: t)
         }
     }
 
     // MARK: - Tick
 
-    /// Advances the scenario clock by `dt` (when running), expires attention and
-    /// cards against run time `t`, and returns the frame to draw.
+    /// Advances the scenario clock by `dt` (when running), lets attention and
+    /// cards time out against run time `t`, and returns the frame to draw.
     public func tick(dt: Double, at t: TimeInterval) -> HUDFrame {
-        if running {
-            clock += dt
-
-            if clock > 40 {
-                clock = 0
-                seen = []
-            }
-        }
+        lastT = t
+        trigger.advance(by: dt)
 
         if let until = attnUntil, t > until {
             attention = .idle
             attnUntil = nil
         }
 
-        if active != nil, t > activeUntil {
-            flywheel += 1
+        // Cards whose time is up come down first; then the open windows propose.
+        let finished = arbiter.decide([], budget: AdaptiveEngine.budget, at: t).decisions
+            .filter { $0.reason == .finished }.count
+        if finished > 0 {
+            flywheel += finished
             onFlywheel?(flywheel)
-            active = nil
         }
-
-        if running {
-            autoScan(at: t)
+        trigger.showing = arbiter.showing?.key
+        let proposed = trigger.evaluate(state: state(at: t), at: t)
+        let shown = proposed.isEmpty ? arbiter.showing
+            : arbiter.decide(proposed, budget: AdaptiveEngine.budget, at: t).showing
+        // A card the engine forces clears the attention read-out.
+        if let s = shown, s.reveal == .auto, arbiter.shownAt == t, proposed.contains(where: { $0.key == s.key }) {
+            attention = .idle
         }
-
         return render()
     }
 
     // MARK: - Render
 
     public func render() -> HUDFrame {
-        var f = HUDFrame()
-        f.add(.clear)
-        f.add(.luma([8, 11, 13, 15][band.rawValue]))
-
-        if band == .stationary, active == nil {
-            drawDashboard(into: &f)
-            return f
-        }
-
-        if let c = active {
-            drawCard(c, into: &f)
-            return f
-        }
-
-        drawAmbient(into: &f)
-        return f
+        Renderer.frame(for: arbiter.showing, budget: AdaptiveEngine.budget, state: state(at: lastT), unit: .miles,
+                       quiet: trigger.quietScreen(band: band, motion: motion, heartRate: heartRate))
     }
 
-    private func drawDashboard(into f: inout HUDFrame) {
-        f.add(.text(x: 24, y: 48, font: .small, color: 8, align: .left, scenario.name))
-        f.add(.line(x0: 24, y0: 58, x1: 280, y1: 58, color: 5))
-
-        let rows = Array(scenario.dashboard.prefix(4))
-
-        for (i, row) in rows.enumerated() {
-            f.add(.text(
-                x: 28,
-                y: 88 + i * 30,
-                font: .small,
-                color: 13,
-                align: .left,
-                row
-            ))
-        }
-
-        f.add(.text(x: Display.cx, y: 214, font: .small, color: 6, align: .center, "LOOK FOR CONTEXT"))
-    }
-
-    private func drawAmbient(into f: inout HUDFrame) {
-        let a = scenario.ambient(band, motion, heartRate)
-
-        switch band {
-        case .stationary:
-            f.add(.text(x: Display.cx, y: 86, font: .small, color: 11, align: .center, a.sub))
-            f.add(.text(x: Display.cx, y: 132, font: .large, color: 15, align: .center, a.big))
-            f.add(.text(x: Display.cx, y: 162, font: .small, color: 9, align: .center, a.unit))
-            f.add(.text(x: Display.cx, y: 206, font: .small, color: 5, align: .center, "LOOK"))
-
-        case .light:
-            f.add(.text(x: Display.cx, y: 82, font: .small, color: 11, align: .center, a.sub))
-            f.add(.text(x: Display.cx, y: 130, font: .large, color: 15, align: .center, a.big))
-            f.add(.text(x: Display.cx, y: 162, font: .small, color: 9, align: .center, a.unit))
-            f.add(.text(x: Display.cx, y: 206, font: .small, color: 5, align: .center, "LOOK"))
-
-        case .moderate:
-            f.add(.text(x: Display.cx, y: 86, font: .small, color: 9, align: .center, a.sub))
-            f.add(.text(x: Display.cx, y: 132, font: .large, color: 15, align: .center, a.big))
-            f.add(.text(x: Display.cx, y: 164, font: .small, color: 9, align: .center, a.unit))
-
-        case .hard:
-            f.add(.text(x: Display.cx, y: 136, font: .large, color: 15, align: .center, a.big))
-            f.add(.text(x: Display.cx, y: 168, font: .small, color: 9, align: .center, a.unit))
-        }
-    }
-
-    private func drawCard(_ c: ContextCard, into f: inout HUDFrame) {
-        let cx = Display.cx
-
-        switch c.glyph {
-        case .arrow:
-            f.add(.line(x0: cx - 24, y0: 70, x1: cx + 22, y1: 70, color: 15))
-            f.add(.line(x0: cx + 22, y0: 70, x1: cx + 6, y1: 56, color: 15))
-            f.add(.line(x0: cx + 22, y0: 70, x1: cx + 6, y1: 84, color: 15))
-
-        case .warn:
-            f.add(.line(x0: cx - 18, y0: 84, x1: cx + 18, y1: 84, color: 15))
-            f.add(.line(x0: cx - 18, y0: 84, x1: cx, y1: 54, color: 15))
-            f.add(.line(x0: cx + 18, y0: 84, x1: cx, y1: 54, color: 15))
-            f.add(.text(x: cx, y: 79, font: .small, color: 15, align: .center, "!"))
-
-        case .drop:
-            f.add(.circf(x: cx, y: 70, r: 10, color: 13))
-
-        case .clock:
-            f.add(.circ(x: cx, y: 70, r: 15, color: 15))
-            f.add(.line(x0: cx, y0: 70, x1: cx, y1: 58, color: 15))
-            f.add(.line(x0: cx, y0: 70, x1: cx + 8, y1: 70, color: 15))
-
-        case .none:
-            break
-        }
-
-        f.add(.text(x: cx, y: 128, font: .large, color: 15, align: .center, c.line1))
-        f.add(.text(x: cx, y: 162, font: .medium, color: 14, align: .center, c.line2))
-
-        f.add(.rect(x0: cx - 36, y0: 186, x1: cx + 36, y1: 214, color: 8))
-        f.add(.text(x: cx, y: 206, font: .small, color: 11, align: .center, c.tag))
+    /// What the renderer needs to know of the demo: the effort band.
+    private func state(at t: TimeInterval) -> RunState {
+        RunState(elapsed: t, distance: 0, effort: band)
     }
 }

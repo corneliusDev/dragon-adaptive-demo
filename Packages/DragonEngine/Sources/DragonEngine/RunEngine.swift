@@ -1,16 +1,20 @@
 //  RunEngine.swift
-//  The plan-driven pipeline: estimator → triggers → arbiter → render, for a
-//  run with a RunPlan loaded. (Without a plan the app keeps today's scenario
-//  AdaptiveEngine.) The split and pace-gap triggers feed the arbiter, which
-//  obeys the budget Capacity works out each step from the state, attention
-//  and the display setting. The cue log (chunk 8) will keep each step's decisions.
+//  The coordinator for a run with a RunPlan loaded: ingest → estimate →
+//  trigger → capacity → arbitrate → render, every update. The split and
+//  pace-gap triggers feed the arbiter, which obeys the budget Capacity works
+//  out each step from the state, attention and the display setting; the
+//  Renderer lays the chosen cue out to fit that budget. A step carries a new
+//  frame only when what is drawn changed, so the glasses aren't sent the same
+//  frame again. (The scenario demos run the same trigger → arbiter → render
+//  stages through AdaptiveEngine, with ScriptedTrigger.) The cue log (chunk 8)
+//  will keep each step's decisions.
 //
 //      var engine = RunEngine(plan: plan)
 //      engine.ingest(event)               // every sample, in time order
 //      engine.displaySetting = .minimal   // any time; next update uses it
 //      let step = engine.update(at: t)    // run time; once per tick
 //      engine.dismiss(at: t)              // the runner dismissed the cue
-//      backend.apply(engine.frame())
+//      if let frame = step.frame { backend.apply(frame) }
 //
 //  A value like StateEstimator; it never reads the clock.
 
@@ -23,11 +27,15 @@ public struct RunEngine {
         public var paceGap: PaceGapTrigger.Config
         public var arbiter = Arbiter.Config()
         public var capacity = CapacityConfig()
+        public var render = RenderConfig()
         /// Minimal / Balanced / Coach at the start; RunEngine.displaySetting changes it later.
         public var display = DisplaySetting.balanced
+        /// Miles or kilometres, for splits, paces and the distances drawn.
+        public var unit: DistanceUnit
 
         /// Splits and paces in `unit`.
         public init(unit: DistanceUnit = .miles) {
+            self.unit = unit
             split = SplitTrigger.Config(unit: unit)
             paceGap = PaceGapTrigger.Config(unit: unit)
         }
@@ -45,6 +53,8 @@ public struct RunEngine {
         /// What the arbiter was allowed to show, and the table row it came from.
         public var budget: Budget
         public var situation: Capacity.Situation
+        /// The frame to send, when it differs from the last one a step carried; nil when unchanged.
+        public var frame: HUDFrame?
     }
 
     public let plan: RunPlan
@@ -56,6 +66,10 @@ public struct RunEngine {
     public private(set) var capacity: Capacity
     /// The latest state, once update(at:) has run.
     public private(set) var state: RunState?
+    /// The latest budget, once update(at:) has run.
+    public private(set) var budget: Budget?
+    /// Signature of the last frame a step carried.
+    private var sentSignature: String?
 
     public var current: Cue? { arbiter.showing }
 
@@ -99,12 +113,17 @@ public struct RunEngine {
         let situation = capacity.situation(for: s, effort: effortOverride)
         let budget = capacity.budget(for: s, at: t, effort: effortOverride)
         let (shown, decisions) = arbiter.decide(proposed, budget: budget, at: t, distance: s.distance)
+        self.budget = budget
+        let drawn = frame()
+        let changed = drawn.signature != sentSignature
+        if changed { sentSignature = drawn.signature }
         return Step(state: s, proposed: proposed, current: shown, decisions: decisions,
-                    budget: budget, situation: situation)
+                    budget: budget, situation: situation, frame: changed ? drawn : nil)
     }
 
-    /// The chosen cue (or the quiet screen) as a frame.
+    /// The chosen cue (or the quiet status dot), laid out for the latest budget.
     public func frame() -> HUDFrame {
-        CueRenderer.frame(for: current, effort: state?.effort ?? .moderate)
+        Renderer.frame(for: current, budget: budget ?? config.capacity.relaxed, state: state,
+                       unit: config.unit, config: config.render)
     }
 }
