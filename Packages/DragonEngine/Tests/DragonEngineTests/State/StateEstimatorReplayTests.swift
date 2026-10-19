@@ -53,10 +53,13 @@ final class StateEstimatorReplayTests: XCTestCase {
             // Climb, once the 30 s window is all uphill.
             let climb = race.rows.filter { $0.state.distance > hill.start + 100 && $0.state.distance < hill.start + hill.length }
             XCTAssertGreaterThan(climb.count, 60)
+            var rawKnown = 0
             for row in climb {
                 guard let raw = row.state.pace30s else { continue }
+                rawKnown += 1
                 XCTAssertGreaterThan(raw, plan * 1.05, "raw pace on the climb from \(hill.start) at t=\(row.t)")
             }
+            XCTAssertGreaterThan(Double(rawKnown), 0.9 * Double(climb.count), "raw pace known on the climb from \(hill.start)")
 
             // Up, over and down the other side.
             let hillRows = race.rows.filter {

@@ -16,7 +16,8 @@
 //                 window covered (course elevation, or GPS altitude with no course).
 //      projection elapsed + the plan's time for the rest of the course (grade
 //                 included), stretched by how far the runner's grade-adjusted
-//                 5-minute pace is off plan. That correction is weighted by
+//                 5-minute pace is off plan, counting only as much as the
+//                 latest 2.5 minutes confirm. That correction is weighted by
 //                 progress — none until 30%, full from 92% — and early on a
 //                 dead band treats small deviations as noise: five minutes of
 //                 pace wobble says little about the next hour.
@@ -48,7 +49,7 @@ public struct StateEstimator {
         public var blendTo = 0.92
         /// Early on, pace within this fraction of plan counts as on plan for the
         /// projection; it narrows to nothing as actual pace takes over.
-        public var paceDeadBand = 0.008
+        public var paceDeadBand = 0.010
         public var driftWindow: TimeInterval = 300
         /// Pace counts as steady for drift when its two halves differ by no more than this.
         public var steadyPaceTolerance = 0.03
@@ -345,23 +346,32 @@ public struct StateEstimator {
 
     /// Seconds to the finish from `distance`: the plan's time for the rest
     /// of the course (grade included), scaled by how far the runner's
-    /// grade-adjusted trend pace is off plan, by a weight that grows with
-    /// progress. Early on, small deviations inside the dead band count as on
+    /// grade-adjusted trend pace is off plan (as far as its latest half
+    /// agrees), by a weight that grows with progress. Early on, small deviations inside the dead band count as on
     /// plan; a few minutes of pace says little about the next hour.
     private func remainingTime(from distance: Double, at t: TimeInterval) -> TimeInterval {
         let planned = costs.plannedRemaining(from: distance)
         let flatAhead = costs.flatRemaining(from: distance)
-        guard flatAhead > 0, let trend = speed(over: tuning.trendWindow, at: t),
-              let pace = pace(trend.speed) else { return planned }
-        let flatPace = pace / (meanGradeFactor(from: trend.from, to: trend.to) ?? 1)
-        let planFlatPace = planned / flatAhead
-        let off = flatPace / planFlatPace - 1
+        guard flatAhead > 0, let long = flatPaceOff(over: tuning.trendWindow, at: t, planFlatPace: planned / flatAhead)
+        else { return planned }
+        // Count only what the latest half of the window confirms: a real change
+        // of pace shows in both (the full window, lagging, is the smaller), while
+        // a wobble that is already reversing shows in one.
+        let recent = flatPaceOff(over: tuning.trendWindow / 2, at: t, planFlatPace: planned / flatAhead) ?? long
+        let off = long * recent > 0 ? (abs(long) < abs(recent) ? long : recent) : 0
 
         let progress = distance / plan.distanceMeters
         let w = min(1, max(0, (progress - tuning.blendFrom) / (tuning.blendTo - tuning.blendFrom)))
         let band = tuning.paceDeadBand * (1 - w * w)
         let counted = off > 0 ? max(0, off - band) : min(0, off + band)
         return planned * (1 + w * counted)
+    }
+
+    /// Fraction the runner's grade-adjusted pace over `window` is off a flat
+    /// plan pace (+ = slower); nil without enough fixes or movement.
+    private func flatPaceOff(over window: TimeInterval, at t: TimeInterval, planFlatPace: Double) -> Double? {
+        guard let w = speed(over: window, at: t), let pace = pace(w.speed) else { return nil }
+        return pace / (meanGradeFactor(from: w.from, to: w.to) ?? 1) / planFlatPace - 1
     }
 
     // MARK: Heart rate drift
