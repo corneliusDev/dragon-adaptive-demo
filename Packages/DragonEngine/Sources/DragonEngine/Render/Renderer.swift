@@ -55,7 +55,10 @@ public enum Renderer {
     /// `unit` is for distances.
     public static func frame(for cue: Cue?, budget: Budget, state: RunState?, unit: DistanceUnit,
                              quiet: QuietScreen = .statusDot, config: RenderConfig = RenderConfig()) -> HUDFrame {
-        frame(for: cue, form: form(for: budget, config: config), effort: state?.effort ?? .moderate,
+        // The kick clock is alone on screen in the final stretch, so it keeps
+        // its full layout (time and distance left) even under an empty budget.
+        let form = cue?.key.kind == .kickClock ? .full : form(for: budget, config: config)
+        return frame(for: cue, form: form, effort: state?.effort ?? .moderate,
               unit: unit, quiet: quiet, config: config, now: state.map(CueFormat.Now.init))
     }
 

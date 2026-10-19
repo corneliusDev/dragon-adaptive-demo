@@ -244,9 +244,9 @@ final class WalkthroughReplayTests: XCTestCase {
         Moment(name: "11 Final kick", mile: 12.95, time: 6_202, mileWithin: 0.01, timeWithin: 120,
                row: at(mile: 12.95), shows: .kickClock,
                budget: (0, .safety, .finalStretch),
-               // The empty budget draws the reduced kick clock (chunk 7): heading and time;
-               // the design's third line, "LEFT · 0.16 MI", is in the cue but not drawn.
-               screen: [.same("TO BEAT 1:45:00"), Line(design: "1:38", pattern: clock, within: 15)],
+               // The kick clock keeps its full layout under the empty budget: all three lines.
+               screen: [.same("TO BEAT 1:45:00"), Line(design: "1:38", pattern: clock, within: 15),
+                        .same("LEFT 0.16 MI")],
                also: { race, row in
                    XCTAssertEqual(row.state.phase, .kick)
                    XCTAssertEqual(row.current.flatMap { $0.content.subtitle.first }.map {
