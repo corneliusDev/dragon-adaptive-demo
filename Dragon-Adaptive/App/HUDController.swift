@@ -16,6 +16,9 @@
 //  today's scenario AdaptiveEngine does. In the race the effort slider stands
 //  in for the measured effort in the capacity budget (drag it up and the
 //  display gets sparser), and the Minimal / Balanced / Coach setting shifts it.
+//  The race's cue log (every arbiter decision, the runner's responses and the
+//  outcomes) replaces the flywheel count in RACE mode; when the race finishes
+//  it is saved to Documents/CueLogs as JSON lines and the review list opens.
 
 import Foundation
 import Combine
@@ -65,6 +68,12 @@ final class HUDController: ObservableObject {
     /// A screen from the gallery held on the mirror and the glasses in place of
     /// the live HUD; nil = live.
     @Published private(set) var galleryFrame: HUDFrame?
+    /// The race's cue log so far.
+    @Published private(set) var raceLog: CueLog?
+    /// Where the race's cue log was last saved; nil until it has been.
+    @Published private(set) var raceLogURL: URL?
+    /// The review list is open (set when a race finishes, or by CUE LOG).
+    @Published var showCueLog = false
     /// The slider's effort (0–100) in place of the measured one, once dragged in a race; nil = measured.
     @Published var effortOverride: Double? {
         didSet { runEngine.effortOverride = effortOverride }
@@ -80,8 +89,12 @@ final class HUDController: ObservableObject {
     // Race pipeline: everything the race's GPS and watch sent goes through the
     // RunEngine (estimator → triggers → arbiter), updated at race run time.
     private lazy var runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting,
-                                                             effort: effortOverride)
+                                                             effort: effortOverride,
+                                                             name: "\(race.profile.name) seed \(race.seed)")
     private var raceStarted = false
+    private var raceLogSaved = false
+    private var raceStartDate = Date()
+    private let logStore = CueLogStore.documents
 
     // HR older than this is treated as missing and the engine falls back to its estimate.
     private let hrStaleAfter: TimeInterval = 5
@@ -291,8 +304,13 @@ final class HUDController: ObservableObject {
     func resetRace() {
         race.reset(profile: raceProfile)
         racePlaying = false
-        runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting, effort: effortOverride)
+        runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting, effort: effortOverride,
+                                                name: "\(raceProfile.name) seed \(race.seed)")
         raceStarted = false
+        raceLogSaved = false
+        raceStartDate = Date()
+        raceLog = nil
+        raceLogURL = nil
         raceState = nil
         raceDecisions = []
         raceBudget = nil
@@ -330,15 +348,35 @@ final class HUDController: ObservableObject {
     }
 
     /// A RunEngine with the controller's display setting and effort override applied.
-    static func makeRunEngine(plan: RunPlan, display: DisplaySetting, effort: Double?) -> RunEngine {
+    static func makeRunEngine(plan: RunPlan, display: DisplaySetting, effort: Double?, name: String = "") -> RunEngine {
         var config = RunEngine.Config()
         config.display = display
+        config.name = name
         var engine = RunEngine(plan: plan, config: config)
         engine.effortOverride = effort
         return engine
     }
 
     var raceTargetTime: TimeInterval { race.run.plan.targetTime }
+
+    /// Saves the race's cue log so far and opens the review list (the CUE LOG button).
+    func openCueLog() {
+        saveRaceLog()
+        showCueLog = true
+    }
+
+    /// Writes the cue log to Documents/CueLogs; the file is named for the
+    /// profile, seed and the time the race was set up.
+    private func saveRaceLog() {
+        let log = runEngine.log
+        raceLog = log
+        do {
+            raceLogURL = try logStore.save(log, name: CueLogStore.runName(log.header.name.isEmpty ? "race" : log.header.name,
+                                                                          at: raceStartDate))
+        } catch {
+            print("[HUDController] cue log save failed: \(error)")
+        }
+    }
 
     /// Attention reaches the race pipeline at race run time.
     private func receiveRaceAttention(_ event: AttentionEvent) {
@@ -444,6 +482,14 @@ final class HUDController: ObservableObject {
                 raceState = step.state
                 decisions = step.decisions
                 budget = (step.budget, step.situation)
+                if race.run.isFinished && !raceLogSaved {
+                    raceLogSaved = true
+                    runEngine.finish(at: race.run.finishTime ?? race.run.time)
+                    DispatchQueue.main.async {
+                        self.saveRaceLog()
+                        self.showCueLog = true
+                    }
+                }
             }
             nextFrame = runEngine.frame()
         } else {
@@ -451,6 +497,7 @@ final class HUDController: ObservableObject {
         }
         let shownFrame = galleryFrame ?? nextFrame
         let cue = usesRunEngine ? runEngine.current : nil
+        let log = usesRunEngine && raceStarted ? runEngine.log : nil
 
         DispatchQueue.main.async {
             self.frame = shownFrame
@@ -469,6 +516,7 @@ final class HUDController: ObservableObject {
                 self.raceBudget = budget?.0
                 self.raceSituation = budget?.1
                 if !decisions.isEmpty { self.raceDecisions = decisions }
+                if let log { self.raceLog = log }
                 self.raceLabel = self.raceTag
                 self.racePlaying = self.race.isStreaming
             }

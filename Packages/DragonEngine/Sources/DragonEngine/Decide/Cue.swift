@@ -8,14 +8,14 @@
 import Foundation
 
 /// How much a cue matters. Comparable: safety > critical > advisory > info.
-public enum Priority: Int, Sendable, Comparable, CaseIterable {
+public enum Priority: Int, Sendable, Codable, Comparable, CaseIterable {
     case info, advisory, critical, safety
 
     public static func < (a: Priority, b: Priority) -> Bool { a.rawValue < b.rawValue }
 }
 
 /// Stable identity of a cue, for de-duplication now and cooldowns later.
-public enum CueKey: Sendable, Hashable {
+public enum CueKey: Sendable, Hashable, Codable {
     /// The `marker`th mile or kilometre marker.
     case split(marker: Int, unit: DistanceUnit)
     /// Behind or ahead of target; one key either way, so the cooldown is shared.
@@ -82,7 +82,7 @@ public enum CueKey: Sendable, Hashable {
 }
 
 /// The kinds of cue, one renderer layout each (the design's screens).
-public enum CueKind: String, Sendable, CaseIterable {
+public enum CueKind: String, Sendable, Codable, CaseIterable {
     case split, paceGap, status, detail, target, heartCeiling, terrain, fuel, formFade, kickClock, finish
     /// A Scenario card from the cycling / SOF demos.
     case scripted
@@ -90,13 +90,13 @@ public enum CueKind: String, Sendable, CaseIterable {
 
 /// A reading a cue depends on. When the budget says it is unreliable the cue
 /// is held back.
-public enum CueInput: String, Sendable, Hashable, CaseIterable {
+public enum CueInput: String, Sendable, Hashable, Codable, CaseIterable {
     case gps, heartRate
 }
 
 /// A condition a cue waits for before it may show (chunk 9 holds a split
 /// until the top of a hill). A deferred cue still expires at its expiresAt.
-public enum Deferral: Sendable, Equatable {
+public enum Deferral: Sendable, Equatable, Codable {
     /// Until this run time.
     case time(TimeInterval)
     /// Until the runner has covered this many metres (e.g. the crest of a climb).
@@ -106,7 +106,7 @@ public enum Deferral: Sendable, Equatable {
 }
 
 /// One piece of cue text, as a value. Render formats it.
-public indirect enum CueText: Sendable, Equatable {
+public indirect enum CueText: Sendable, Equatable, Codable {
     /// Words shown as they are ("VS PLAN").
     case label(String)
     /// "MILE 3" / "KM 3".
@@ -124,7 +124,7 @@ public indirect enum CueText: Sendable, Equatable {
 }
 
 /// One row of a table (the held look's recent splits): a label and its value.
-public struct CueRow: Sendable, Equatable {
+public struct CueRow: Sendable, Equatable, Codable {
     public var label: CueText
     public var value: CueText
 
@@ -135,7 +135,7 @@ public struct CueRow: Sendable, Equatable {
 }
 
 /// What a cue shows, top to bottom.
-public struct CueContent: Sendable, Equatable {
+public struct CueContent: Sendable, Equatable, Codable {
     /// Small line above the value ("MILE 1", "BEHIND PLAN").
     public var heading: CueText?
     /// The one value that matters.

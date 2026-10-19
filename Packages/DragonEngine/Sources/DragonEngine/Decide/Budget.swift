@@ -11,7 +11,7 @@
 
 import Foundation
 
-public struct Budget: Sendable, Equatable {
+public struct Budget: Sendable, Equatable, Codable {
     /// Elements that fit on screen; 0 is the empty budget (only safety gets through).
     /// The renderer (chunk 7) picks a layout to fit it; the arbiter only asks "is it empty".
     public var maxElements: Int

@@ -31,7 +31,7 @@
 import Foundation
 
 /// How chatty the glasses should be, set before the run.
-public enum DisplaySetting: String, Sendable, Equatable, CaseIterable {
+public enum DisplaySetting: String, Sendable, Equatable, Codable, CaseIterable {
     case minimal, balanced, coach
 
     /// Elements added to (or taken from) every budget.
@@ -103,7 +103,7 @@ public struct AttentionWindow: Sendable, Equatable {
 
 public struct Capacity: Sendable {
     /// Which row of the table applies.
-    public enum Situation: String, Sendable, Equatable {
+    public enum Situation: String, Sendable, Equatable, Codable, CaseIterable {
         case standing, easy, raceEffort, hardEffort, climbing, surge, kick, technicalTurn, finalStretch
 
         /// Words for the debug overlay.

@@ -26,7 +26,7 @@
 
 import Foundation
 
-public enum MovementPhase: String, Sendable, Equatable, CaseIterable {
+public enum MovementPhase: String, Sendable, Equatable, Codable, CaseIterable {
     case stopped, steady, surging, climbing, kick
 }
 

@@ -6,8 +6,10 @@
 //  Renderer lays the chosen cue out to fit that budget. A step carries a new
 //  frame only when what is drawn changed, so the glasses aren't sent the same
 //  frame again. (The scenario demos run the same trigger → arbiter → render
-//  stages through AdaptiveEngine, with ScriptedTrigger.) The cue log (chunk 8)
-//  will keep each step's decisions.
+//  stages through AdaptiveEngine, with ScriptedTrigger.) Every step's
+//  decisions go into the engine's cue log (`log`), with the state they were
+//  made in, the runner's attention matched to the cue on screen, and the
+//  pace-gap and heart-rate cues' outcomes a minute later.
 //
 //      var engine = RunEngine(plan: plan)
 //      engine.ingest(event)               // every sample, in time order
@@ -15,6 +17,8 @@
 //      let step = engine.update(at: t)    // run time; once per tick
 //      engine.dismiss(at: t)              // the runner dismissed the cue
 //      if let frame = step.frame { backend.apply(frame) }
+//      engine.finish(at: t)               // across the line (else noticed by position)
+//      try engine.log.jsonLines()         // save the cue log
 //
 //  A value like StateEstimator; it never reads the clock.
 
@@ -28,6 +32,9 @@ public struct RunEngine {
         public var arbiter = Arbiter.Config()
         public var capacity = CapacityConfig()
         public var render = RenderConfig()
+        public var log = CueLogger.Config()
+        /// Label for the cue log's header (e.g. the synthetic profile and seed).
+        public var name = ""
         /// Minimal / Balanced / Coach at the start; RunEngine.displaySetting changes it later.
         public var display = DisplaySetting.balanced
         /// Miles or kilometres, for splits, paces and the distances drawn.
@@ -68,10 +75,15 @@ public struct RunEngine {
     public private(set) var state: RunState?
     /// The latest budget, once update(at:) has run.
     public private(set) var budget: Budget?
+    /// Builds the cue log from every step's decisions.
+    public private(set) var logger: CueLogger
     /// Signature of the last frame a step carried.
     private var sentSignature: String?
 
     public var current: Cue? { arbiter.showing }
+
+    /// Every decision so far, with its context, response and outcome.
+    public var log: CueLog { logger.log }
 
     public var displaySetting: DisplaySetting {
         get { capacity.setting }
@@ -90,11 +102,24 @@ public struct RunEngine {
         paceGap = PaceGapTrigger(plan: plan, config: config.paceGap)
         arbiter = Arbiter(config: config.arbiter)
         capacity = Capacity(config: config.capacity, setting: config.display, raceDistance: plan.distanceMeters)
+        logger = CueLogger(header: CueLog.Header(name: config.name, targetTime: plan.targetTime,
+                                                 distance: plan.distanceMeters, display: config.display),
+                           config: config.log)
     }
 
     public mutating func ingest(_ event: RunEvent) {
         estimator.ingest(event)
-        if case .attention(let a) = event { capacity.note(a) }
+        if case .attention(let a) = event {
+            capacity.note(a)
+            logger.note(a)
+        }
+    }
+
+    /// The runner crossed the line at run time `t`. Until this is called,
+    /// update(at:) logs the first update whose estimated distance reaches the
+    /// plan's; this replaces that (the caller knows better).
+    public mutating func finish(at t: TimeInterval) {
+        logger.finish(at: t)
     }
 
     /// The runner dismissed the cue on screen: it comes down and its key cools
@@ -114,6 +139,8 @@ public struct RunEngine {
         let budget = capacity.budget(for: s, at: t, effort: effortOverride)
         let (shown, decisions) = arbiter.decide(proposed, budget: budget, at: t, distance: s.distance)
         self.budget = budget
+        logger.record(decisions, cues: arbiter.decided, state: s, budget: budget, situation: situation, at: t)
+        if s.distance >= plan.distanceMeters && logger.log.header.finishTime == nil { logger.finish(at: t) }
         let drawn = frame()
         let changed = drawn.signature != sentSignature
         if changed { sentSignature = drawn.signature }

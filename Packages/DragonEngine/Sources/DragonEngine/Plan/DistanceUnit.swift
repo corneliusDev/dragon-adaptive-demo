@@ -5,7 +5,7 @@
 
 import Foundation
 
-public enum DistanceUnit: String, Sendable, CaseIterable {
+public enum DistanceUnit: String, Sendable, Codable, CaseIterable {
     case miles
     case kilometers
 

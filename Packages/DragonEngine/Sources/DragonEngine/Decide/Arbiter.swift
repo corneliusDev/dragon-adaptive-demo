@@ -26,8 +26,8 @@ import Foundation
 
 /// What the arbiter did with one cue on one call, and why. Chunk 8's cue log
 /// keeps these.
-public struct Decision: Sendable, Equatable {
-    public enum Outcome: String, Sendable {
+public struct Decision: Sendable, Equatable, Codable {
+    public enum Outcome: String, Sendable, Codable, CaseIterable {
         /// On screen now (just went up, or still within its minimum time).
         case shown
         /// Still in play, not on screen; it may show on a later call.
@@ -36,7 +36,7 @@ public struct Decision: Sendable, Equatable {
         case expired
     }
 
-    public enum Reason: Sendable, Equatable {
+    public enum Reason: Sendable, Equatable, Codable {
         // Shown.
         /// The best cue the budget allows, and the screen was free.
         case won
@@ -170,6 +170,11 @@ public struct Arbiter: Sendable {
     public private(set) var cooldownUntil: [CueKey: TimeInterval] = [:]
     /// Decisions made between calls (a dismissal), reported by the next decide.
     private var pending: [Decision] = []
+    private var pendingCues: [Cue] = []
+    /// The cue each of the last decide's decisions was about, in the same order.
+    /// A Decision names only the key, and two cues with one key can be in play
+    /// at once (one on screen, a newer one waiting); the cue log tells them apart.
+    public private(set) var decided: [Cue] = []
 
     public init(config: Config = Config()) {
         self.config = config
@@ -184,6 +189,7 @@ public struct Arbiter: Sendable {
         showing = nil
         cooldownUntil[c.key] = max(cooldownUntil[c.key] ?? 0, t + config.dismissedCooldown)
         pending.append(Decision(t: t, key: c.key, priority: c.priority, reason: .dismissed))
+        pendingCues.append(c)
         return true
     }
 
@@ -201,10 +207,14 @@ public struct Arbiter: Sendable {
     public mutating func decide(_ candidates: [Cue], budget: Budget, at t: TimeInterval,
                                 distance: Double? = nil) -> (showing: Cue?, decisions: [Decision]) {
         var out = pending
+        var cues = pendingCues
         pending = []
+        pendingCues = []
         func record(_ c: Cue, _ reason: Decision.Reason) {
             out.append(Decision(t: t, key: c.key, priority: c.priority, reason: reason))
+            cues.append(c)
         }
+        defer { decided = cues }
 
         // Rule 4 (end of it) and rule 1 for the cue on screen.
         if let c = showing {

@@ -10,7 +10,7 @@
 
 import Foundation
 
-public enum MotionBand: Int, Sendable {
+public enum MotionBand: Int, Sendable, Codable {
     case stationary, light, moderate, hard
 
     /// Band for a 0–100 motion/exertion reading.

@@ -2,7 +2,7 @@
 //  A recorded run: the plan plus every timestamped input the engine saw
 //  (GPS, vitals, attention). Codable JSON, so recordings can be saved from the
 //  app, generated from synthetic profiles, and checked in as test fixtures.
-//  The cue log joins this in a later chunk.
+//  The cue log (CueLog) is saved beside it, as JSON lines.
 
 import Foundation
 
