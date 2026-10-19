@@ -85,6 +85,34 @@ final class ArbiterTests: XCTestCase {
         XCTAssertEqual(decision(.split(mile: 1), in: closed)?.reason, .budgetClosed)
     }
 
+    func testFinalStretchDropsEverythingButSafety() {
+        var stretch = Budget.safetyOnly
+        stretch.finalStretch = true
+        var arbiter = Arbiter()
+        // A split showing, and a pace gap waiting, when the runner enters the stretch.
+        _ = arbiter.decide([cue(.split(mile: 12), .advisory, at: 0, show: 5)], budget: .relaxed, at: 0)
+        _ = arbiter.decide([cue(.paceGap, .info, at: 1, expires: 60)], budget: .relaxed, at: 1)
+        XCTAssertEqual(arbiter.showing?.key, .split(mile: 12))
+        XCTAssertEqual(arbiter.waiting.map(\.key), [.paceGap])
+        let (showing, d) = arbiter.decide([cue(.split(mile: 13), .advisory, at: 2)], budget: stretch, at: 2)
+        XCTAssertNil(showing)
+        // All three leave play for good, with the final-stretch reason; not held back.
+        for key in [CueKey.split(mile: 12), .paceGap, .split(mile: 13)] {
+            XCTAssertEqual(decision(key, in: d)?.reason, .finalStretch, key.name)
+            XCTAssertEqual(decision(key, in: d)?.outcome, .expired, key.name)
+        }
+        XCTAssertNil(arbiter.showing)
+        XCTAssertTrue(arbiter.waiting.isEmpty)
+        // Safety still shows there.
+        XCTAssertEqual(arbiter.decide([cue(.split(mile: 14), .safety, at: 3)], budget: stretch, at: 3).showing?.key,
+                       .split(mile: 14))
+        // An ordinary empty budget (a surge) only holds cues back.
+        var surge = Arbiter()
+        let held = surge.decide([cue(.paceGap, .critical, at: 0, expires: 60)], budget: .safetyOnly, at: 0).decisions
+        XCTAssertEqual(decision(.paceGap, in: held)?.reason, .budgetEmpty)
+        XCTAssertEqual(surge.waiting.count, 1)
+    }
+
     // MARK: Rule 3: cooldowns
 
     func testSecondPaceGapCueInsideNinetySecondsIsHeldBackAndOneAfterShows() {
@@ -331,9 +359,18 @@ final class ArbiterTests: XCTestCase {
                 XCTAssertTrue(left.contains(p.cue.key) || inPlay.contains(p.cue.key),
                               "\(profile.name): \(p.cue.key.name) vanished")
             }
-            // Through the arbiter every split still made it to the screen.
+            // Through the arbiter every split still made it to the screen, except
+            // those proposed in the final 400 m: those leave play unshown, dropped
+            // for the final stretch.
             for p in race.splitProposals {
-                XCTAssertTrue(race.rows.contains { $0.current?.key == p.cue.key }, "\(profile.name): \(p.cue.key.name)")
+                let name = "\(profile.name): \(p.cue.key.name)"
+                if race.plan.distanceMeters - p.row.state.distance <= 400 {
+                    XCTAssertFalse(race.rows.contains { $0.current?.key == p.cue.key }, name)
+                    let out = race.rows.flatMap(\.decisions).filter { $0.key == p.cue.key && $0.outcome == .expired }
+                    XCTAssertEqual(out.map(\.reason), [.finalStretch], name)
+                } else {
+                    XCTAssertTrue(race.rows.contains { $0.current?.key == p.cue.key }, name)
+                }
             }
         }
     }

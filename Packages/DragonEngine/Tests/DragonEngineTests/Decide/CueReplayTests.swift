@@ -24,11 +24,19 @@ final class CueReplayTests: XCTestCase {
             XCTAssertEqual(p.row.t, crossed.t, accuracy: 15, "mile \(i + 1)")
             XCTAssertEqual(race.splits[i].time, 481, accuracy: 10, "mile \(i + 1)")
         }
-        // Every split made it to the screen, for its 3 s.
-        for i in 1...13 {
+        // Splits 1–12 made it to the screen, for their 3 s each.
+        for i in 1...12 {
             let shown = race.rows.filter { $0.current?.key == .split(mile: i) }
             XCTAssertEqual(shown.count, 3, "mile \(i)")
         }
+        // Mile 13 falls 176 m from the finish, in the final 400 m: proposed, but
+        // dropped there and never shown (the kick clock, chunk 9, owns the stretch).
+        let mile13 = CueKey.split(mile: 13)
+        XCTAssertLessThanOrEqual(race.plan.distanceMeters - splits[12].row.state.distance, 400)
+        XCTAssertFalse(race.rows.contains { $0.current?.key == mile13 })
+        let left = race.rows.flatMap(\.decisions).filter { $0.key == mile13 && $0.outcome == .expired }
+        XCTAssertEqual(left.map(\.reason), [.finalStretch])
+        XCTAssertEqual(left.first?.text, "final 400 m: only safety until the finish")
     }
 
     func testSlowFadeFromMileNineFiresThePaceGapCueAfterMileNineAndNotBefore() {

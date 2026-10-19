@@ -99,6 +99,35 @@ final class CapacityTests: XCTestCase {
                      2, .advisory)
     }
 
+    func testFinalFourHundredMetresByPositionGivesNothingExceptSafety() {
+        // A half marathon: the stretch starts 400 m from the plan's finish,
+        // decided by position, whatever the runner does.
+        let total = 21_097.5
+        let c = Capacity(raceDistance: total)
+        func at(_ left: Double, phase: MovementPhase = .steady, effort: Double = 80) -> RunState {
+            var s = state(phase: phase, effort: effort)
+            s.distance = total - left
+            return s
+        }
+        for s in [at(400), at(176), at(10), at(176, phase: .stopped, effort: 5), at(300, effort: 30),
+                  at(200, phase: .kick, effort: 95), at(-5)] {
+            XCTAssertEqual(c.situation(for: s), .finalStretch, "\(total - s.distance) m to go")
+            let b = c.budget(for: s, at: 600)
+            assertBudget(b, 0, .safety)
+            XCTAssertTrue(b.finalStretch)
+            XCTAssertTrue(b.admits(.safety))
+            XCTAssertFalse([.info, .advisory, .critical].contains { b.admits($0) })
+        }
+        // Just before it, ordinary running; with no finish there's no stretch.
+        XCTAssertEqual(c.situation(for: at(401)), .raceEffort)
+        XCTAssertFalse(c.budget(for: at(401), at: 600).finalStretch)
+        XCTAssertEqual(Capacity().situation(for: at(100)), .raceEffort)
+        // Coach (or a glance) adds room, but still safety only.
+        var coach = Capacity(setting: .coach, raceDistance: total)
+        coach.note(AttentionSample(t: 600, event: .glance))
+        assertBudget(coach.budget(for: at(100), at: 600), 2, .safety)
+    }
+
     func testRunnerGlancedAddsOneElementForOneAndAHalfSeconds() {
         var c = Capacity()
         let s = state(effort: 80)

@@ -75,7 +75,7 @@ public struct RunEngine {
         split = SplitTrigger(plan: plan, config: config.split)
         paceGap = PaceGapTrigger(plan: plan, config: config.paceGap)
         arbiter = Arbiter(config: config.arbiter)
-        capacity = Capacity(config: config.capacity, setting: config.display)
+        capacity = Capacity(config: config.capacity, setting: config.display, raceDistance: plan.distanceMeters)
     }
 
     public mutating func ingest(_ event: RunEvent) {

@@ -12,6 +12,8 @@
 //       longer after the runner dismissed it than after it was ignored.
 //    4. Let a cue finish: a showing cue keeps the screen for its minimum time
 //       unless something more important arrives (and the budget allows it).
+//       In the race's final stretch (budget.finalStretch) a cue other than
+//       safety is dropped, not held back: it could never show before the finish.
 //    5. Drop stale cues: one that can't show by its expiresAt is skipped, not
 //       shown late. That holds for deferred cues too.
 //    6. Log everything: every cue in play gets a Decision on every call —
@@ -72,12 +74,15 @@ public struct Decision: Sendable, Equatable {
         case dismissed
         /// The budget no longer allows it while it was showing.
         case budgetClosed
+        /// Not safety, in the race's final stretch: dropped, never shown (the
+        /// kick clock owns the last 400 m).
+        case finalStretch
 
         public var outcome: Outcome {
             switch self {
             case .won, .interrupted, .onScreen: return .shown
             case .budgetEmpty, .belowBudget, .unreliable, .coolingDown, .deferred, .outranked, .screenBusy: return .heldBack
-            case .stale, .replaced, .finished, .cutShort, .dismissed, .budgetClosed: return .expired
+            case .stale, .replaced, .finished, .cutShort, .dismissed, .budgetClosed, .finalStretch: return .expired
             }
         }
     }
@@ -122,6 +127,7 @@ public struct Decision: Sendable, Equatable {
         case .cutShort(let other): return "cut short by the \(other.name)"
         case .dismissed: return "dismissed by the runner"
         case .budgetClosed: return "budget no longer allows it"
+        case .finalStretch: return "final 400 m: only safety until the finish"
         }
     }
 }
@@ -192,7 +198,10 @@ public struct Arbiter: Sendable {
                 record(c, .finished)
                 showing = nil
             } else if !budget.admits(c.priority) {
-                record(c, .budgetClosed)
+                record(c, budget.finalStretch ? .finalStretch : .budgetClosed)
+                showing = nil
+            } else if budget.finalStretch && c.priority != .safety {
+                record(c, .finalStretch)
                 showing = nil
             }
         }
@@ -210,6 +219,15 @@ public struct Arbiter: Sendable {
             guard t > cue.expiresAt else { return false }
             record(cue, .stale)
             return true
+        }
+
+        // Rule 1 in the final stretch: everything but safety leaves play.
+        if budget.finalStretch {
+            waiting.removeAll { cue in
+                guard cue.priority != .safety else { return false }
+                record(cue, .finalStretch)
+                return true
+            }
         }
 
         // Rules 1, 3 and deferral: what may show at all.

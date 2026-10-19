@@ -73,13 +73,25 @@ final class CapacityReplayTests: XCTestCase {
         }
     }
 
-    func testOnPlanBudgetIsTwoElementsAllRace() {
+    func testOnPlanBudgetIsTwoElementsAllRaceExceptTheFinalStretch() {
         // Racing on the flat at ~80 effort: steady at race effort throughout,
-        // so every split still shows.
+        // so every split before the final stretch still shows. The last 400 m,
+        // by position, is safety only, whatever the runner does.
         let race = cueRace(.onPlan)
-        let late = race.rows.filter { $0.t > 10 }
-        XCTAssertTrue(late.allSatisfy { $0.situation == .raceEffort },
-                      "\(Set(late.map(\.situation.label)))")
-        XCTAssertTrue(late.allSatisfy { $0.budget.maxElements == 2 && $0.budget.minPriority == .advisory })
+        let left = { (row: CueRace.Row) in race.plan.distanceMeters - row.state.distance }
+        let racing = race.rows.filter { $0.t > 10 && left($0) > 400 }
+        let stretch = race.rows.filter { left($0) <= 400 }
+        XCTAssertGreaterThan(stretch.count, 80)
+        XCTAssertTrue(racing.allSatisfy { $0.situation == .raceEffort },
+                      "\(Set(racing.map(\.situation.label)))")
+        XCTAssertTrue(racing.allSatisfy { $0.budget.maxElements == 2 && $0.budget.minPriority == .advisory })
+        for row in stretch {
+            XCTAssertEqual(row.situation, .finalStretch, "\(Int(left(row))) m to go")
+            XCTAssertTrue(row.budget.finalStretch)
+            XCTAssertEqual(row.budget.maxElements, 0)
+            XCTAssertTrue(row.budget.admits(.safety))
+            XCTAssertFalse([.info, .advisory, .critical].contains { row.budget.admits($0) }, "\(Int(left(row))) m to go")
+            XCTAssertTrue(row.current.map { $0.priority == .safety } ?? true)
+        }
     }
 }

@@ -7,6 +7,7 @@
 //      Steady at race effort               2 elements · advisory and up
 //      Hard effort or climbing             1 element  · critical and up
 //      Surge, final kick, technical turn   nothing except safety
+//      Final 400 m (by position)           nothing except safety, and the rest dropped
 
 import Foundation
 
@@ -23,13 +24,18 @@ public struct Budget: Sendable, Equatable {
     /// (not taken down if already showing). Safety cues are not exempt; a
     /// safety cue shouldn't depend on data it can't trust.
     public var unreliable: Set<CueInput>
+    /// In the race's final stretch (the last 400 m, by position): nothing but
+    /// safety until the finish, so the arbiter drops other cues rather than
+    /// holding them back. The kick clock (chunk 9) owns this stretch.
+    public var finalStretch: Bool
 
     public init(maxElements: Int, minPriority: Priority, allowInterrupt: Bool = true,
-                unreliable: Set<CueInput> = []) {
+                unreliable: Set<CueInput> = [], finalStretch: Bool = false) {
         self.maxElements = maxElements
         self.minPriority = minPriority
         self.allowInterrupt = allowInterrupt
         self.unreliable = unreliable
+        self.finalStretch = finalStretch
     }
 
     public var isEmpty: Bool { maxElements <= 0 }
