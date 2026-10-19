@@ -146,12 +146,20 @@ final class CueLogTests: XCTestCase {
     func testSlowFadeRecoveryPaceGapOutcomeShowsTheGapShrinking() {
         // The recovery starts at mile 9.4, as the pace-gap cue goes up (about mile 9.42),
         // the earliest it can start with the cue still firing.
-        // KNOWN FAILING (chunk 8 report): the projected-finish gap 60 s after the
-        // cue is still larger than at show (≈18 s → ≈29 s) for every recovery
-        // point tried; the estimator's projection follows a 5-minute pace trend
-        // confirmed over 2.5 minutes, so it only turns down ~90–120 s after the
-        // runner speeds up. Left failing rather than changing the measure, the
-        // delay or the profile.
+        // KNOWN FAILING (chunk 8, awaiting a decision): here the projected-finish
+        // gap 60 s after the cue is larger than at show (≈18 s → ≈29 s). The
+        // estimator's projection follows a 5-minute pace trend, so it only turns
+        // down ~90–120 s after the runner speeds up. When the recovery starts at
+        // or after the cue appears (the realistic case, incl. recoverAt = 10 mi)
+        // the gap always grows over 60 s. It shrinks only in narrow windows where
+        // the recovery starts shortly before the cue, on particular seeds (e.g.
+        // from 9 mi, recoverAt 9.27–9.28 mi, seed 7; from 8 mi, 8.26–8.28 mi,
+        // seed 7; from 6 mi, 6.31–6.32 mi, seed 42; from 8 mi, 8.35 mi, seed 42).
+        // Moving recoverAt by ~0.01–0.02 mi or changing the seed undoes it.
+        // Picking such a window would tune the scenario to the estimator's lag,
+        // so the scenario is left realistic. The options (tuned scenario, a
+        // faster-reacting measure, a longer delay, a faster projection) each
+        // change a spec value or committed behaviour and are left to a human.
         let race = logRace(.slowFadeRecovery(from: 9 * mile, recoverAt: 9.4 * mile))
         let gaps = race.engine.log.appearances.filter { $0.cue.kind == .paceGap }
         XCTAssertEqual(gaps.count, 1)
