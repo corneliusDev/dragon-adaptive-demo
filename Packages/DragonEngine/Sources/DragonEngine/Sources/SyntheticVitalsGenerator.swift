@@ -123,6 +123,6 @@ public struct SyntheticVitalsGenerator {
             return nil
         }
 
-        return VitalsSample(timestamp: elapsed, heartRate: heartRate, motion: motion)
+        return VitalsSample(timestamp: elapsed, heartRate: heartRate, motion: motion, source: .synthetic)
     }
 }

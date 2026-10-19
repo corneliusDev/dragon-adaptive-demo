@@ -6,8 +6,22 @@
 
 import Foundation
 
-public enum MotionBand: Int {
+public enum MotionBand: Int, Sendable {
     case stationary, light, moderate, hard
+
+    /// Band for a 0–100 motion/exertion reading.
+    public init(motion: Double) {
+        switch motion {
+        case ..<6:
+            self = .stationary
+        case ..<38:
+            self = .light
+        case ..<72:
+            self = .moderate
+        default:
+            self = .hard
+        }
+    }
 
     public var label: String {
         ["STATIONARY", "LIGHT", "MODERATE", "HARD"][rawValue]
@@ -40,18 +54,7 @@ public final class AdaptiveEngine {
         self.scenario = scenario
     }
 
-    public var band: MotionBand {
-        switch motion {
-        case ..<6:
-            return .stationary
-        case ..<38:
-            return .light
-        case ..<72:
-            return .moderate
-        default:
-            return .hard
-        }
-    }
+    public var band: MotionBand { MotionBand(motion: motion) }
 
     public func setScenario(_ s: Scenario) {
         reset()

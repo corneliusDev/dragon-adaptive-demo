@@ -189,7 +189,9 @@ public struct SyntheticRun {
         let e = effort(pace: p, grade: g, at: distance, t: time)
         if let sample = vitals.advance(by: dt, exertion: e) {
             // Stamp with the exact run time; the generator's own clock is a running float sum.
-            out.append(.vitals(VitalsSample(timestamp: time, heartRate: sample.heartRate, motion: sample.motion)))
+            // These are what the runner's Watch would send.
+            out.append(.vitals(VitalsSample(timestamp: time, heartRate: sample.heartRate, motion: sample.motion,
+                                            source: .watch)))
         }
 
         if step % SyntheticRun.stepsPerSecond == 0 {

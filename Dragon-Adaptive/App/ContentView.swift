@@ -30,6 +30,15 @@ struct ContentView: View {
             .padding(16)
         }
         .background(Color.black.ignoresSafeArea())
+        #if DEBUG
+        .overlay(alignment: .bottom) {
+            if hud.vitalsMode == .race && hud.showStateOverlay {
+                RunStateDebugView(state: hud.raceState, targetTime: hud.raceTargetTime)
+                    .padding(.horizontal, 12).padding(.bottom, 6)
+                    .onTapGesture { hud.toggleStateOverlay() }
+            }
+        }
+        #endif
         .sheet(isPresented: $showCourseDebug) { CourseDebugView() }
     }
 
@@ -91,6 +100,10 @@ struct ContentView: View {
                     .background(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.22)))
             }
             Text(hud.raceLabel).font(.system(size: 12, design: .monospaced)).foregroundColor(amber)
+            #if DEBUG
+            Button(hud.showStateOverlay ? "HIDE STATE OVERLAY" : "SHOW STATE OVERLAY") { hud.toggleStateOverlay() }
+                .font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+            #endif
         }
         .padding(.top, 4)
     }

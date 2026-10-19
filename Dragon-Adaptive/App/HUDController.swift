@@ -44,6 +44,9 @@ final class HUDController: ObservableObject {
     @Published var raceSpeed: Double = 1
     @Published var racePlaying = false
     @Published var raceLabel = "—"
+    /// What the state estimator makes of the race so far (debug overlay).
+    @Published var raceState: RunState?
+    @Published var showStateOverlay = true
 
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
     private let session = GlassesSession()
@@ -52,11 +55,10 @@ final class HUDController: ObservableObject {
     private let synthetic = SyntheticVitalsSource()
     private let race = SyntheticRaceSource()
 
-    // Race state, from what the race's GPS and watch sent (race run time).
-    private var raceDistance: Double?           // metres along the course
-    private var raceLastFix: LocationSample?
-    private var raceHR: Double?
-    private var raceTime: TimeInterval = 0
+    // Race state: everything the race's GPS and watch sent goes through the
+    // engine's estimator, asked for the state at race run time.
+    private lazy var raceEstimator = StateEstimator(plan: race.run.plan)
+    private var raceStarted = false
 
     // HR older than this is treated as missing and the engine falls back to its estimate.
     private let hrStaleAfter: TimeInterval = 5
@@ -82,6 +84,7 @@ final class HUDController: ObservableObject {
             print("[HUDController] simulated attention event: \(event)")
             guard let self = self else { return }
             self.engine.handle(event, at: self.now)
+            self.receiveRaceAttention(event)
             self.backend?.invalidate()
         }
         sim.start()
@@ -93,11 +96,13 @@ final class HUDController: ObservableObject {
         race.onVitals = { [weak self] sample in
             guard let self = self else { return }
             self.receive(sample)
-            self.raceTime = max(self.raceTime, sample.timestamp)
-            if let hr = sample.heartRate { self.raceHR = hr }
+            self.raceEstimator.ingest(sample)
+            self.raceStarted = true
         }
         race.onSample = { [weak self] fix in
-            self?.receive(fix)
+            guard let self = self else { return }
+            self.raceEstimator.ingest(fix)
+            self.raceStarted = true
         }
 
         engine.onFlywheel = { [weak self] n in
@@ -126,6 +131,7 @@ final class HUDController: ObservableObject {
                 print("[HUDController] glasses gesture event: \(event)")
                 guard let self = self else { return }
                 self.engine.handle(event, at: self.now)
+                self.receiveRaceAttention(event)
                 self.backend?.invalidate()
             }
             gesture.start()
@@ -262,35 +268,36 @@ final class HUDController: ObservableObject {
     func resetRace() {
         race.reset(profile: raceProfile)
         racePlaying = false
-        raceDistance = nil
-        raceLastFix = nil
-        raceHR = nil
-        raceTime = 0
+        raceEstimator = StateEstimator(plan: race.run.plan)
+        raceStarted = false
+        raceState = nil
         raceLabel = "—"
     }
 
-    private func receive(_ fix: LocationSample) {
-        raceLastFix = fix
-        raceTime = max(raceTime, fix.t)
-        // Distance comes from the GPS, the way it will on a real run.
-        guard fix.horizontalAccuracy <= 20, let course = race.run.plan.course else { return }
-        raceDistance = course.locate(latitude: fix.latitude, longitude: fix.longitude, near: raceDistance).distance
+    func toggleStateOverlay() {
+        showStateOverlay.toggle()
+    }
+
+    var raceTargetTime: TimeInterval { race.run.plan.targetTime }
+
+    /// Attention reaches the race estimator at race run time.
+    private func receiveRaceAttention(_ event: AttentionEvent) {
+        guard vitalsMode == .race, raceStarted else { return }
+        raceEstimator.ingest(AttentionSample(t: race.run.time, event: event))
     }
 
     private var raceTag: String {
-        guard raceLastFix != nil || raceHR != nil else { return "—" }
-        let miles = (raceDistance ?? 0) / DistanceUnit.metersPerMile
-        let total = Int(raceTime)
-        let clock = String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
-        let hr = raceHR.map { "HR \(Int($0))" } ?? "HR —"
+        guard let s = raceState else { return "—" }
+        let miles = s.distance / DistanceUnit.metersPerMile
+        let hr = s.heartRate.map { "HR \(Int($0))" } ?? "HR —"
         let gps: String
-        if let fix = raceLastFix, raceTime - fix.t < 3 {
-            gps = String(format: "±%.0f m", fix.horizontalAccuracy)
+        if let age = s.quality.secondsSinceFix, age < 3, let acc = s.quality.gpsAccuracy {
+            gps = String(format: "±%.0f m", acc)
         } else {
             gps = "NO GPS"
         }
         let done = race.run.isFinished ? " · FINISHED" : ""
-        return String(format: "%.2f mi · %@ · %@ · %@%@", miles, clock, hr, gps, done)
+        return String(format: "%.2f mi · %@ · %@ · %@%@", miles, RunStateFormat.clock(s.elapsed), hr, gps, done)
     }
 
     // MARK: - Vitals
@@ -373,6 +380,7 @@ final class HUDController: ObservableObject {
             } ?? (self.engine.band == .stationary ? "dashboard" : "ambient only")
             self.vitalsLabel = self.vitalsTag
             if self.vitalsMode == .race {
+                self.raceState = self.raceStarted ? self.raceEstimator.state(at: self.race.run.time) : nil
                 self.raceLabel = self.raceTag
                 self.racePlaying = self.race.isStreaming
             }
