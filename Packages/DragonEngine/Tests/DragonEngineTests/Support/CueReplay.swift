@@ -1,6 +1,7 @@
 //  CueReplay.swift
 //  Test support: a whole synthetic race through the RunEngine pipeline, one
-//  update per second, keeping what the triggers proposed and what was shown.
+//  update per second, keeping what the triggers proposed, what the arbiter
+//  decided and what was shown.
 //
 //      let race = cueRace(.onPlan)
 //      race.proposed.filter { $0.cue.key == .paceGap }
@@ -15,6 +16,8 @@ struct CueRace {
         let state: RunState
         let proposed: [Cue]
         let current: Cue?
+        /// The arbiter's decisions this step.
+        let decisions: [Decision]
         /// Pace-gap trigger's direction after this step, if on.
         let paceGap: PaceGapTrigger.Direction?
     }
@@ -51,7 +54,7 @@ func cueRace(_ profile: SyntheticProfile, seed: UInt64 = 42, config: RunEngine.C
         for event in run.advance(by: 1) { engine.ingest(event) }
         let step = engine.update(at: run.time)
         rows.append(.init(t: run.time, trueDistance: run.distance, state: step.state, proposed: step.proposed,
-                          current: step.current, paceGap: engine.paceGap.active))
+                          current: step.current, decisions: step.decisions, paceGap: engine.paceGap.active))
     }
     let race = CueRace(profile: profile, plan: run.plan, rows: rows, splits: engine.split.splits)
     cueRaceCache[key] = race

@@ -33,7 +33,8 @@ struct ContentView: View {
         #if DEBUG
         .overlay(alignment: .bottom) {
             if hud.vitalsMode == .race && hud.showStateOverlay {
-                RunStateDebugView(state: hud.raceState, targetTime: hud.raceTargetTime)
+                RunStateDebugView(state: hud.raceState, targetTime: hud.raceTargetTime,
+                                      decisions: hud.raceDecisions)
                     .padding(.horizontal, 12).padding(.bottom, 6)
                     .onTapGesture { hud.toggleStateOverlay() }
             }

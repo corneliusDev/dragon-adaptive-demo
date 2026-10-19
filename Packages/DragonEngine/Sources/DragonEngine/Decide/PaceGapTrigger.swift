@@ -97,6 +97,7 @@ public struct PaceGapTrigger: Trigger {
                                        icon: direction == .behind ? .warn : .none),
                    createdAt: t,
                    expiresAt: t + config.expiresAfter,
-                   minShow: config.minShow)
+                   minShow: config.minShow,
+                   planGap: gap)
     }
 }

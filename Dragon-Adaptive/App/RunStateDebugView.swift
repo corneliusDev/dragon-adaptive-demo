@@ -1,8 +1,9 @@
 //  RunStateDebugView.swift
 //  Debug overlay for a synthetic race: what the engine's state estimator makes
 //  of it — projected finish, gap to target, pace, heart rate — and how far to
-//  trust each (DataQuality). Engine values are metres, seconds and s/m;
-//  turning them into clocks and min/mi happens here.
+//  trust each (DataQuality) — and what the arbiter last decided about each
+//  cue, with its reason. Engine values are metres, seconds and s/m; turning
+//  them into clocks and min/mi happens here.
 
 import SwiftUI
 import DragonEngine
@@ -30,6 +31,17 @@ enum RunStateFormat {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
+    /// "SHOWN · mile 3 split · highest priority the budget allows"
+    static func decision(_ d: Decision) -> String {
+        let outcome: String
+        switch d.outcome {
+        case .shown: outcome = "SHOWN"
+        case .heldBack: outcome = "HELD"
+        case .expired: outcome = "DROPPED"
+        }
+        return "\(outcome) · \(d.key.name) · \(d.text)"
+    }
+
     /// Short labels for whatever DataQuality is flagging; empty when all is well.
     static func flags(_ q: DataQuality) -> [String] {
         var out: [String] = []
@@ -46,6 +58,8 @@ enum RunStateFormat {
 struct RunStateDebugView: View {
     let state: RunState?
     let targetTime: TimeInterval
+    /// The arbiter's latest decisions; shown under the state.
+    var decisions: [Decision] = []
     private let amber = Color(red: 1, green: 0.54, blue: 0.24)
     private let phos = Color(red: 57 / 255, green: 226 / 255, blue: 122 / 255)
 
@@ -84,6 +98,24 @@ struct RunStateDebugView: View {
         Text(flags.isEmpty ? "DATA OK" : flags.joined(separator: " · "))
             .font(.system(size: 10, weight: .semibold, design: .monospaced))
             .foregroundColor(flags.isEmpty ? phos : amber)
+        decisionRows
+    }
+
+    @ViewBuilder
+    private var decisionRows: some View {
+        Text("ARBITER\(decisions.first.map { " @ " + RunStateFormat.clock($0.t) } ?? "")")
+            .font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.gray)
+            .padding(.top, 2)
+        if decisions.isEmpty {
+            Text("no cue proposed yet").foregroundColor(.gray)
+        }
+        // What is on screen first, then what was held back or dropped.
+        let ordered = decisions.filter { $0.outcome == .shown } + decisions.filter { $0.outcome != .shown }
+        ForEach(Array(ordered.prefix(3).enumerated()), id: \.offset) { _, d in
+            Text(RunStateFormat.decision(d))
+                .foregroundColor(d.outcome == .shown ? phos : d.outcome == .heldBack ? amber : Color(white: 0.55))
+                .lineLimit(2).minimumScaleFactor(0.7)
+        }
     }
 
     private func age(_ seconds: TimeInterval?) -> String {

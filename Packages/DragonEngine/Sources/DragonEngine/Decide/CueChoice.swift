@@ -1,5 +1,6 @@
 //  CueChoice.swift
-//  Placeholder for the arbiter (chunk 5): at most one cue on screen, the
+//  Superseded by Arbiter (chunk 5), which RunEngine now uses; kept for its
+//  tests. The chunk 4 placeholder: at most one cue on screen, the
 //  highest priority wins. A cue stays up for its minShow unless something
 //  strictly more important arrives; waiting cues are dropped once they
 //  expire; a newer proposal with the same key replaces a waiting one.

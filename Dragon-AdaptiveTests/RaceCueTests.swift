@@ -32,4 +32,25 @@ final class RaceCueTests: XCTestCase {
         XCTAssertEqual(texts.first, "MILE 1")
         XCTAssertTrue(texts.contains("SPLIT"))
     }
+
+    func testOverlayShowsTheArbitersDecisionAndReasonDuringASyntheticRace() {
+        let source = SyntheticRaceSource(profile: .onPlan, seed: 42)
+        var engine = RunEngine(plan: source.run.plan)
+        source.onSample = { engine.ingest(.location($0)) }
+        source.onVitals = { engine.ingest(.vitals($0)) }
+
+        var lines: [String] = []
+        while source.run.time < 600, lines.count < 2 {
+            source.step(by: 0.5)
+            let step = engine.update(at: source.run.time)
+            for d in step.decisions where d.key == .split(mile: 1) {
+                lines.append(RunStateFormat.decision(d))
+            }
+        }
+        XCTAssertEqual(lines.first, "SHOWN · mile 1 split · highest priority the budget allows")
+        XCTAssertEqual(lines.dropFirst().first?.hasPrefix("SHOWN · mile 1 split · keeps the screen"), true)
+        XCTAssertEqual(RunStateFormat.decision(Decision(t: 0, key: .paceGap, priority: .critical,
+                                                        reason: .coolingDown(until: 42))),
+                       "HELD · pace gap · in its cooldown for 42 s more")
+    }
 }

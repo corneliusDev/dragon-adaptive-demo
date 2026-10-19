@@ -84,6 +84,7 @@ public struct SplitTrigger: Trigger {
                                 tag: "SPLIT"),
             createdAt: t,
             expiresAt: t + config.expiresAfter,
-            minShow: config.minShow)
+            minShow: config.minShow,
+            planGap: split.vsPlan)
     }
 }

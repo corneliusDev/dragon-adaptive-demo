@@ -23,6 +23,25 @@ public enum CueKey: Sendable, Hashable {
 
     public static func split(mile: Int) -> CueKey { .split(marker: mile, unit: .miles) }
     public static func split(kilometer: Int) -> CueKey { .split(marker: kilometer, unit: .kilometers) }
+
+    /// Words for logs and debug text ("mile 3 split", "pace gap"). Not display text.
+    public var name: String {
+        switch self {
+        case .split(let n, let unit): return "\(unit == .miles ? "mile" : "km") \(n) split"
+        case .paceGap: return "pace gap"
+        }
+    }
+}
+
+/// A condition a cue waits for before it may show (chunk 9 holds a split
+/// until the top of a hill). A deferred cue still expires at its expiresAt.
+public enum Deferral: Sendable, Equatable {
+    /// Until this run time.
+    case time(TimeInterval)
+    /// Until the runner has covered this many metres (e.g. the crest of a climb).
+    case distance(Double)
+    /// Until the arbiter is told `release(key)`; for conditions only a trigger can see.
+    case released
 }
 
 /// One piece of cue text, as a value. Render formats it.
@@ -73,9 +92,15 @@ public struct Cue: Sendable, Equatable {
     public var expiresAt: TimeInterval
     /// Seconds it stays up once shown, unless something more important arrives.
     public var minShow: TimeInterval
+    /// Seconds off plan this cue is about (+ behind, − ahead), if it is about the
+    /// plan at all. Breaks priority ties in the arbiter: the bigger gap wins.
+    public var planGap: TimeInterval?
+    /// Wait for this before showing; nil shows as soon as the arbiter allows.
+    public var deferUntil: Deferral?
 
     public init(key: CueKey, priority: Priority, reveal: Reveal = .auto, content: CueContent,
-                createdAt: TimeInterval, expiresAt: TimeInterval, minShow: TimeInterval) {
+                createdAt: TimeInterval, expiresAt: TimeInterval, minShow: TimeInterval,
+                planGap: TimeInterval? = nil, deferUntil: Deferral? = nil) {
         self.key = key
         self.priority = priority
         self.reveal = reveal
@@ -83,5 +108,7 @@ public struct Cue: Sendable, Equatable {
         self.createdAt = createdAt
         self.expiresAt = expiresAt
         self.minShow = minShow
+        self.planGap = planGap
+        self.deferUntil = deferUntil
     }
 }

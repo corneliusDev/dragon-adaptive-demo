@@ -50,6 +50,8 @@ final class HUDController: ObservableObject {
     @Published var raceLabel = "—"
     /// What the state estimator makes of the race so far (debug overlay).
     @Published var raceState: RunState?
+    /// The arbiter's latest decisions (the last step that had any), for the overlay.
+    @Published var raceDecisions: [Decision] = []
     @Published var showStateOverlay = true
 
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
@@ -60,7 +62,7 @@ final class HUDController: ObservableObject {
     private let race = SyntheticRaceSource()
 
     // Race pipeline: everything the race's GPS and watch sent goes through the
-    // RunEngine (estimator → triggers → choice), updated at race run time.
+    // RunEngine (estimator → triggers → arbiter), updated at race run time.
     private lazy var runEngine = RunEngine(plan: race.run.plan)
     private var raceStarted = false
 
@@ -275,6 +277,7 @@ final class HUDController: ObservableObject {
         runEngine = RunEngine(plan: race.run.plan)
         raceStarted = false
         raceState = nil
+        raceDecisions = []
         raceLabel = "—"
     }
 
@@ -380,8 +383,13 @@ final class HUDController: ObservableObject {
         let legacyFrame = engine.tick(dt: dt, at: now)
         let nextFrame: HUDFrame
         var raceState: RunState?
+        var decisions: [Decision] = []
         if usesRunEngine {
-            if raceStarted { raceState = runEngine.update(at: race.run.time).state }
+            if raceStarted {
+                let step = runEngine.update(at: race.run.time)
+                raceState = step.state
+                decisions = step.decisions
+            }
             nextFrame = runEngine.frame()
         } else {
             nextFrame = legacyFrame
@@ -402,6 +410,7 @@ final class HUDController: ObservableObject {
             self.vitalsLabel = self.vitalsTag
             if self.vitalsMode == .race {
                 self.raceState = raceState
+                if !decisions.isEmpty { self.raceDecisions = decisions }
                 self.raceLabel = self.raceTag
                 self.racePlaying = self.race.isStreaming
             }
