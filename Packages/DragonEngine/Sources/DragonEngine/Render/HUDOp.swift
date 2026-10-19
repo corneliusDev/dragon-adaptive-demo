@@ -5,7 +5,7 @@
 
 import Foundation
 
-public enum HUDFont: UInt8 {
+public enum HUDFont: UInt8, Sendable, CaseIterable {
     case small = 1
     case medium = 2
     case large = 3
@@ -19,14 +19,66 @@ public enum HUDFont: UInt8 {
         case .huge: return 18
         }
     }
+
+    /// Characters a line in this font may hold: GlassesBackend cuts anything
+    /// longer off, so the renderer fits text to this first.
+    public var maxChars: Int {
+        switch self {
+        case .small: return 28
+        case .medium: return 20
+        case .large: return 14
+        case .huge: return 10
+        }
+    }
+
+    /// Height of a line, for layout and safe-zone checks (text is drawn centred on its y).
+    public var height: Int {
+        switch self {
+        case .small: return 12
+        case .medium: return 16
+        case .large: return 22
+        case .huge: return 26
+        }
+    }
+
+    /// The largest font the glasses draw: font 4 is clamped to 3 until the real
+    /// display is calibrated, so the renderer never asks for it.
+    public static let largestOnGlasses = HUDFont.large
+
+    /// The font the glasses actually use for this one.
+    public var onGlasses: HUDFont {
+        rawValue > HUDFont.largestOnGlasses.rawValue ? HUDFont.largestOnGlasses : self
+    }
+
+    /// The next size down, nil for the smallest.
+    public var smaller: HUDFont? { HUDFont(rawValue: rawValue - 1) }
 }
 
-public enum HUDAlign {
+/// Text fitting that matches what the glasses accept.
+public enum HUDText {
+    /// The font and string to draw `string` in, starting at `font` (capped at
+    /// what the glasses draw) and stepping down a size while it is over the
+    /// font's character limit or wider than `width` points. Cut short only
+    /// when even the smallest font can't hold it.
+    public static func fit(_ string: String, font: HUDFont, width: Int? = nil) -> (font: HUDFont, string: String) {
+        var f = font.onGlasses
+        func fits(_ f: HUDFont) -> Bool {
+            string.count <= f.maxChars && width.map { string.count * f.advance <= $0 } != false
+        }
+        while !fits(f), let next = f.smaller { f = next }
+        guard !fits(f) else { return (f, string) }
+        var limit = f.maxChars
+        if let width { limit = min(limit, width / f.advance) }
+        return (f, String(string.prefix(max(0, limit))))
+    }
+}
+
+public enum HUDAlign: Sendable, Equatable {
     case left
     case center
 }
 
-public enum HUDOp {
+public enum HUDOp: Sendable, Equatable {
     case clear
     case luma(UInt8)
     case text(x: Int, y: Int, font: HUDFont, color: UInt8, align: HUDAlign, _ string: String)
@@ -50,7 +102,34 @@ public enum Display {
     public static let safeMaxY = 220
 }
 
-public struct HUDFrame {
+extension HUDOp {
+    /// What the op covers on the display (inclusive), nil for state ops (clear, luma).
+    /// Text is estimated from the font's advance and line height.
+    public var bounds: (minX: Int, minY: Int, maxX: Int, maxY: Int)? {
+        switch self {
+        case .clear, .luma:
+            return nil
+        case .text(let x, let y, let font, _, let align, let s):
+            let w = s.count * font.advance
+            let left = align == .center ? x - w / 2 : x
+            return (left, y - font.height / 2, left + w, y + font.height / 2)
+        case .line(let x0, let y0, let x1, let y1, _), .rect(let x0, let y0, let x1, let y1, _),
+             .rectf(let x0, let y0, let x1, let y1, _):
+            return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        case .circ(let x, let y, let r, _), .circf(let x, let y, let r, _):
+            return (x - r, y - r, x + r, y + r)
+        }
+    }
+
+    /// Whether the op lies inside the conservative visible area of the glasses.
+    public var isInsideSafeZone: Bool {
+        guard let b = bounds else { return true }
+        return b.minX >= Display.safeMinX && b.maxX <= Display.safeMaxX
+            && b.minY >= Display.safeMinY && b.maxY <= Display.safeMaxY
+    }
+}
+
+public struct HUDFrame: Sendable, Equatable {
     public var ops: [HUDOp] = []
 
     public init() {}

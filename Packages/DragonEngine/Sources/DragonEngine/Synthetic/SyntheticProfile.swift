@@ -21,6 +21,10 @@ public enum SyntheticProfile: Sendable, Equatable, Codable {
     /// early, a +36 m (118 ft) hill around mile 7.6, a fade from mile 10.5 and a
     /// kick in the last 0.25 mi. Finishes around 1:44:29.
     case designWalkthrough
+    /// slowFade that recovers: on plan until `from`, 5% slow until `recoverAt`,
+    /// then 2% quick for 2.5× the fade's length (making the time back), then on
+    /// plan again. Not in `all`; the pace-gap trigger tests use it to see a cue clear.
+    case slowFadeRecovery(from: Double, recoverAt: Double)
 
     public static let halfMarathon = 21_097.5
 
@@ -42,6 +46,8 @@ public enum SyntheticProfile: Sendable, Equatable, Codable {
         case .hilly: return "hilly"
         case .gpsDropout(let at, let duration): return "gpsDropout(at: \(Int(at)), for: \(Int(duration)))"
         case .designWalkthrough: return "designWalkthrough"
+        case .slowFadeRecovery(let from, let recoverAt):
+            return "slowFadeRecovery(from: \(Int(from)), recoverAt: \(Int(recoverAt)))"
         }
     }
 
@@ -91,6 +97,11 @@ public enum SyntheticProfile: Sendable, Equatable, Codable {
             let kickFrom = total - 0.25 * DistanceUnit.metersPerMile
             let base = 0.9887 + 0.04 * ramp((d - fadeFrom) / 800)
             return base + (0.95 - base) * ramp((d - kickFrom) / 50)
+        case .slowFadeRecovery(let from, let recoverAt):
+            let recovered = recoverAt + 2.5 * (recoverAt - from)
+            let slow = 0.05 * ramp((d - from) / 400) * (1 - ramp((d - recoverAt) / 400))
+            let quick = 0.02 * ramp((d - recoverAt) / 400) * (1 - ramp((d - recovered) / 400))
+            return 1 + slow - quick
         }
     }
 
@@ -101,6 +112,8 @@ public enum SyntheticProfile: Sendable, Equatable, Codable {
             return 8 * ramp((d - from) / 1_600)
         case .designWalkthrough:
             return 6 * ramp((d - 10.5 * DistanceUnit.metersPerMile) / 1_600)
+        case .slowFadeRecovery(let from, let recoverAt):
+            return 6 * ramp((d - from) / 1_600) * (1 - ramp((d - recoverAt) / 1_600))
         default:
             return 0
         }

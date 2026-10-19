@@ -8,6 +8,8 @@
 //  - Live HUD content stays in conservative safe zone.
 //  - Text uses baseline compensation.
 //  - Font 4 is clamped down to 3 until the real display is calibrated.
+//  - Font limits (largest font, characters per font, advance) come from
+//    DragonEngine's HUDFont, the same source the Renderer fits text to.
 //
 
 import Foundation
@@ -249,7 +251,7 @@ final class GlassesBackend {
             x: i16(clampTextX(x)),
             y: glassTextY(clampTextY(y)),
             rotation: .topLR,
-            font: min(font, 3),
+            font: min(font, HUDFont.largestOnGlasses.rawValue),
             color: color,
             string: string
         )
@@ -257,37 +259,20 @@ final class GlassesBackend {
 
     private func safeFont(_ font: HUDFont) -> UInt8 {
         // Avoid font 4 for now. Real glasses often make this too large.
-        min(font.rawValue, 3)
+        font.onGlasses.rawValue
     }
 
     private func estimatedAdvance(for font: HUDFont) -> Int {
-        switch font {
-        case .small: return 7
-        case .medium: return 10
-        case .large: return 15
-        case .huge: return 18
-        }
+        font.advance
     }
 
+    /// A safety net: the Renderer already fits text to these limits.
     private func trimForGlasses(_ string: String, font: HUDFont) -> String {
-        let maxChars: Int
-
-        switch font {
-        case .small:
-            maxChars = 28
-        case .medium:
-            maxChars = 20
-        case .large:
-            maxChars = 14
-        case .huge:
-            maxChars = 10
-        }
-
-        guard string.count > maxChars else {
+        guard string.count > font.maxChars else {
             return string
         }
 
-        return String(string.prefix(maxChars))
+        return String(string.prefix(font.maxChars))
     }
 
     // MARK: - Coordinates

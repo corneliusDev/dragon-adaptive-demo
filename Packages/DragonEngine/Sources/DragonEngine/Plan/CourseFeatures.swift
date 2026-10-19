@@ -17,6 +17,12 @@ public struct Hill: Sendable, Equatable {
     /// Metres climbed from start to end.
     public var gain: Double
 
+    public init(startDistance: Double, endDistance: Double, gain: Double) {
+        self.startDistance = startDistance
+        self.endDistance = endDistance
+        self.gain = gain
+    }
+
     public var length: Double { endDistance - startDistance }
     public var averageGrade: Double { length > 0 ? gain / length : 0 }
 }
@@ -25,6 +31,11 @@ public struct Turn: Sendable, Equatable {
     public var distance: Double
     /// Heading change in degrees; positive = right, negative = left.
     public var angle: Double
+
+    public init(distance: Double, angle: Double) {
+        self.distance = distance
+        self.angle = angle
+    }
 }
 
 public struct AidStation: Sendable, Equatable {

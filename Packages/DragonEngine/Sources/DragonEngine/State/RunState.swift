@@ -2,7 +2,6 @@
 //  The estimator's answer to "where is the runner, how are they doing, and how
 //  much should we trust it": one value per state(at:) call. Metres, seconds,
 //  pace in seconds per metre; nil means unknown, never a stale guess.
-//  (MovementPhase — running / walking / stopped — arrives in chunk 6.)
 
 import Foundation
 
@@ -32,6 +31,11 @@ public enum CourseFeature: Sendable, Equatable {
 public struct Ahead: Sendable, Equatable {
     public var feature: CourseFeature
     public var meters: Double
+
+    public init(feature: CourseFeature, meters: Double) {
+        self.feature = feature
+        self.meters = meters
+    }
 }
 
 /// How far to trust the rest of RunState.
@@ -96,6 +100,53 @@ public struct RunState: Sendable, Equatable {
     public var grade: Double?
     public var ahead: Ahead?
     public var effort: MotionBand
+    /// The effort reading behind `effort` (0–100), averaged over a few seconds;
+    /// nil before any motion reading. Capacity reads this, not the band.
+    public var effortScore: Double?
+    /// Stopped, steady, surging, climbing or kicking (MovementPhaseClassifier).
+    public var phase: MovementPhase
+    /// Latest attention event while it lasts (StateEstimator.Tuning glance/dwell hold).
     public var attention: AttentionEvent
     public var quality: DataQuality
+
+    /// Unknowns default to nil, so a test or a trigger can build just what it needs.
+    public init(elapsed: TimeInterval,
+                distance: Double,
+                pace30s: Double? = nil,
+                pace60s: Double? = nil,
+                gradeAdjustedPace: Double? = nil,
+                projectedFinish: TimeInterval? = nil,
+                gapToTarget: TimeInterval? = nil,
+                behindPlanNow: TimeInterval? = nil,
+                heartRate: Double? = nil,
+                heartZone: Int? = nil,
+                heartDrift: Double? = nil,
+                cadence: Double? = nil,
+                grade: Double? = nil,
+                ahead: Ahead? = nil,
+                effort: MotionBand = .stationary,
+                effortScore: Double? = nil,
+                phase: MovementPhase = .steady,
+                attention: AttentionEvent = .idle,
+                quality: DataQuality = DataQuality()) {
+        self.elapsed = elapsed
+        self.distance = distance
+        self.pace30s = pace30s
+        self.pace60s = pace60s
+        self.gradeAdjustedPace = gradeAdjustedPace
+        self.projectedFinish = projectedFinish
+        self.gapToTarget = gapToTarget
+        self.behindPlanNow = behindPlanNow
+        self.heartRate = heartRate
+        self.heartZone = heartZone
+        self.heartDrift = heartDrift
+        self.cadence = cadence
+        self.grade = grade
+        self.ahead = ahead
+        self.effort = effort
+        self.effortScore = effortScore
+        self.phase = phase
+        self.attention = attention
+        self.quality = quality
+    }
 }

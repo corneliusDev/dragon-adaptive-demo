@@ -10,6 +10,12 @@
 //
 //  The engine is clock-free: this controller owns run time (monotonic seconds
 //  since launch) and passes it to every engine call.
+//
+//  Two pipelines: with a RunPlan loaded (a synthetic race, the RACE source) the
+//  plan-driven RunEngine decides what to show, from race run time; otherwise
+//  today's scenario AdaptiveEngine does. In the race the effort slider stands
+//  in for the measured effort in the capacity budget (drag it up and the
+//  display gets sparser), and the Minimal / Balanced / Coach setting shifts it.
 
 import Foundation
 import Combine
@@ -46,7 +52,23 @@ final class HUDController: ObservableObject {
     @Published var raceLabel = "—"
     /// What the state estimator makes of the race so far (debug overlay).
     @Published var raceState: RunState?
+    /// The arbiter's latest decisions (the last step that had any), for the overlay.
+    @Published var raceDecisions: [Decision] = []
     @Published var showStateOverlay = true
+    /// What the arbiter was allowed to show on the latest step, and why (overlay).
+    @Published var raceBudget: Budget?
+    @Published var raceSituation: Capacity.Situation?
+    /// Minimal / Balanced / Coach for the race pipeline.
+    @Published var displaySetting: DisplaySetting = .balanced {
+        didSet { runEngine.displaySetting = displaySetting }
+    }
+    /// A screen from the gallery held on the mirror and the glasses in place of
+    /// the live HUD; nil = live.
+    @Published private(set) var galleryFrame: HUDFrame?
+    /// The slider's effort (0–100) in place of the measured one, once dragged in a race; nil = measured.
+    @Published var effortOverride: Double? {
+        didSet { runEngine.effortOverride = effortOverride }
+    }
 
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
     private let session = GlassesSession()
@@ -55,9 +77,10 @@ final class HUDController: ObservableObject {
     private let synthetic = SyntheticVitalsSource()
     private let race = SyntheticRaceSource()
 
-    // Race state: everything the race's GPS and watch sent goes through the
-    // engine's estimator, asked for the state at race run time.
-    private lazy var raceEstimator = StateEstimator(plan: race.run.plan)
+    // Race pipeline: everything the race's GPS and watch sent goes through the
+    // RunEngine (estimator → triggers → arbiter), updated at race run time.
+    private lazy var runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting,
+                                                             effort: effortOverride)
     private var raceStarted = false
 
     // HR older than this is treated as missing and the engine falls back to its estimate.
@@ -96,12 +119,12 @@ final class HUDController: ObservableObject {
         race.onVitals = { [weak self] sample in
             guard let self = self else { return }
             self.receive(sample)
-            self.raceEstimator.ingest(sample)
+            self.runEngine.ingest(.vitals(sample))
             self.raceStarted = true
         }
         race.onSample = { [weak self] fix in
             guard let self = self else { return }
-            self.raceEstimator.ingest(fix)
+            self.runEngine.ingest(.location(fix))
             self.raceStarted = true
         }
 
@@ -268,9 +291,12 @@ final class HUDController: ObservableObject {
     func resetRace() {
         race.reset(profile: raceProfile)
         racePlaying = false
-        raceEstimator = StateEstimator(plan: race.run.plan)
+        runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting, effort: effortOverride)
         raceStarted = false
         raceState = nil
+        raceDecisions = []
+        raceBudget = nil
+        raceSituation = nil
         raceLabel = "—"
     }
 
@@ -278,13 +304,50 @@ final class HUDController: ObservableObject {
         showStateOverlay.toggle()
     }
 
+    // MARK: - Screen gallery
+
+    /// Holds `frame` on the mirror and sends it to the glasses (if connected)
+    /// until resumeLiveHUD().
+    func showOnGlasses(_ frame: HUDFrame) {
+        print("[HUDController] gallery frame with \(frame.ops.count) ops")
+        galleryFrame = frame
+        backend?.invalidate()
+        pushImmediateFrame()
+    }
+
+    func resumeLiveHUD() {
+        guard galleryFrame != nil else { return }
+        galleryFrame = nil
+        backend?.invalidate()
+        pushImmediateFrame()
+    }
+
+    var glassesConnected: Bool { backend != nil }
+
+    /// Back to the measured effort for the budget.
+    func useMeasuredEffort() {
+        effortOverride = nil
+    }
+
+    /// A RunEngine with the controller's display setting and effort override applied.
+    static func makeRunEngine(plan: RunPlan, display: DisplaySetting, effort: Double?) -> RunEngine {
+        var config = RunEngine.Config()
+        config.display = display
+        var engine = RunEngine(plan: plan, config: config)
+        engine.effortOverride = effort
+        return engine
+    }
+
     var raceTargetTime: TimeInterval { race.run.plan.targetTime }
 
-    /// Attention reaches the race estimator at race run time.
+    /// Attention reaches the race pipeline at race run time.
     private func receiveRaceAttention(_ event: AttentionEvent) {
         guard vitalsMode == .race, raceStarted else { return }
-        raceEstimator.ingest(AttentionSample(t: race.run.time, event: event))
+        runEngine.ingest(.attention(AttentionSample(t: race.run.time, event: event)))
     }
+
+    /// A plan is loaded: the RunEngine drives the HUD.
+    private var usesRunEngine: Bool { vitalsMode == .race }
 
     private var raceTag: String {
         guard let s = raceState else { return "—" }
@@ -369,26 +432,58 @@ final class HUDController: ObservableObject {
         engine.motion = motionSource.value
         engine.measuredHeartRate = freshHeartRate
 
-        let nextFrame = engine.tick(dt: dt, at: now)
+        // The legacy engine keeps ticking (attention, band labels) either way.
+        let legacyFrame = engine.tick(dt: dt, at: now)
+        let nextFrame: HUDFrame
+        var raceState: RunState?
+        var decisions: [Decision] = []
+        var budget: (Budget, Capacity.Situation)?
+        if usesRunEngine {
+            if raceStarted {
+                let step = runEngine.update(at: race.run.time)
+                raceState = step.state
+                decisions = step.decisions
+                budget = (step.budget, step.situation)
+            }
+            nextFrame = runEngine.frame()
+        } else {
+            nextFrame = legacyFrame
+        }
+        let shownFrame = galleryFrame ?? nextFrame
+        let cue = usesRunEngine ? runEngine.current : nil
 
         DispatchQueue.main.async {
-            self.frame = nextFrame
+            self.frame = shownFrame
             self.bandLabel = self.engine.band.label
             self.attnLabel = self.attnTag
-            self.ctxLabel = self.engine.active.map {
-                "\($0.tag) · \($0.line1)"
-            } ?? (self.engine.band == .stationary ? "dashboard" : "ambient only")
+            if self.usesRunEngine {
+                self.ctxLabel = cue.map(HUDController.cueTag) ?? "quiet"
+            } else {
+                self.ctxLabel = self.engine.active.map {
+                    "\($0.tag) · \($0.line1)"
+                } ?? (self.engine.band == .stationary ? "dashboard" : "ambient only")
+            }
             self.vitalsLabel = self.vitalsTag
             if self.vitalsMode == .race {
-                self.raceState = self.raceStarted ? self.raceEstimator.state(at: self.race.run.time) : nil
+                self.raceState = raceState
+                self.raceBudget = budget?.0
+                self.raceSituation = budget?.1
+                if !decisions.isEmpty { self.raceDecisions = decisions }
                 self.raceLabel = self.raceTag
                 self.racePlaying = self.race.isStreaming
             }
         }
 
         if !showCalibrationOnConnect {
-            backend?.apply(nextFrame)
+            backend?.apply(shownFrame)
         }
+    }
+
+    /// "MILE 3 · 8:14" for the telemetry row.
+    static func cueTag(_ cue: Cue) -> String {
+        let c = cue.content
+        return [c.heading ?? c.tag.map(CueText.label), c.main].compactMap { $0 }.map(CueFormat.string)
+            .joined(separator: " · ")
     }
 
     private var attnTag: String {
