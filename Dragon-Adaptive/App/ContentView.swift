@@ -1,8 +1,10 @@
 //  ContentView.swift
 import SwiftUI
+import DragonEngine
 
 struct ContentView: View {
     @StateObject private var hud = HUDController()
+    @State private var showCourseDebug = false
     private let amber = Color(red: 1, green: 0.54, blue: 0.24)
     private let phos  = Color(red: 57/255, green: 226/255, blue: 122/255)
     private let bench = Color(red: 0.06, green: 0.08, blue: 0.075)
@@ -20,10 +22,24 @@ struct ContentView: View {
                 telemetry
                 Text("The engine decides what to surface and what to hide from motion + attention + context. Faster motion → fewer elements, bigger glyphs. Safety-critical context surfaces unprompted.")
                     .font(.system(size: 12)).foregroundColor(.gray).padding(.horizontal, 4)
+                #if DEBUG
+                Button("COURSE DEBUG") { showCourseDebug = true }
+                    .font(.system(size: 11, design: .monospaced)).foregroundColor(.gray)
+                #endif
             }
             .padding(16)
         }
         .background(Color.black.ignoresSafeArea())
+        #if DEBUG
+        .overlay(alignment: .bottom) {
+            if hud.vitalsMode == .race && hud.showStateOverlay {
+                RunStateDebugView(state: hud.raceState, targetTime: hud.raceTargetTime)
+                    .padding(.horizontal, 12).padding(.bottom, 6)
+                    .onTapGesture { hud.toggleStateOverlay() }
+            }
+        }
+        #endif
+        .sheet(isPresented: $showCourseDebug) { CourseDebugView() }
     }
 
     private var header: some View {
@@ -46,12 +62,59 @@ struct ContentView: View {
                 Text(hud.bandLabel).font(.system(size: 10, design: .monospaced)).foregroundColor(amber)
             }
             Slider(value: $hud.motion, in: 0...100).accentColor(amber)
-                .disabled(hud.vitalsMode == .synthetic)
+                .disabled(hud.vitalsMode != .manual)
             HStack(spacing: 10) {
                 Text("SOURCE").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
-                sourceSeg("SLIDER", .manual); sourceSeg("SYNTHETIC WATCH", .synthetic)
+                sourceSeg("SLIDER", .manual); sourceSeg("WATCH", .synthetic); sourceSeg("RACE", .race)
+            }
+            if hud.vitalsMode == .race {
+                raceControls
             }
         }
+    }
+
+    /// Synthetic race: pick a profile and speed, play it, watch distance and HR advance.
+    private var raceControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("SYNTHETIC RACE").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                Spacer()
+                Menu {
+                    ForEach(SyntheticProfile.all, id: \.name) { profile in
+                        Button(profile.displayName) { hud.setRaceProfile(profile) }
+                    }
+                } label: {
+                    Text(hud.raceProfile.displayName).font(.system(size: 11, design: .monospaced)).foregroundColor(phos)
+                }
+            }
+            HStack(spacing: 10) {
+                speedSeg("1×", 1); speedSeg("10×", 10)
+                Spacer()
+                Button(hud.racePlaying ? "⏸" : "▶") { hud.toggleRace() }
+                    .font(.system(size: 13, design: .monospaced)).foregroundColor(hud.racePlaying ? amber : .white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.22)))
+                Button("↻") { hud.resetRace() }
+                    .font(.system(size: 13, design: .monospaced)).foregroundColor(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.22)))
+            }
+            Text(hud.raceLabel).font(.system(size: 12, design: .monospaced)).foregroundColor(amber)
+            #if DEBUG
+            Button(hud.showStateOverlay ? "HIDE STATE OVERLAY" : "SHOW STATE OVERLAY") { hud.toggleStateOverlay() }
+                .font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+            #endif
+        }
+        .padding(.top, 4)
+    }
+
+    private func speedSeg(_ title: String, _ speed: Double) -> some View {
+        Button(title) { hud.setRaceSpeed(speed) }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(hud.raceSpeed == speed ? phos : .gray)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 7).fill(hud.raceSpeed == speed ? Color(white: 0.14) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
     }
 
     private func sourceSeg(_ title: String, _ mode: VitalsMode) -> some View {

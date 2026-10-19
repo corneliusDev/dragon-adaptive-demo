@@ -1,83 +1,52 @@
 //  SyntheticVitalsSourceTests.swift
+//  The generator itself is tested in DragonEngine; these cover the app's
+//  Timer-driven wrapper around it.
 
 import XCTest
+import DragonEngine
 @testable import Dragon_Adaptive
 
 final class SyntheticVitalsSourceTests: XCTestCase {
-    private let dt = 1.0 / 20.0
-
-    private func run(_ source: SyntheticVitalsSource, seconds: Double) -> [(t: Double, sample: VitalsSample)] {
-        var out: [(Double, VitalsSample)] = []
-        for _ in 0..<Int(seconds / dt) {
-            if let s = source.advance(by: dt) {
-                out.append((source.elapsed, s))
-            }
-        }
-        return out
-    }
-
-    func testSameSeedReplaysSameRun() {
-        let a = run(SyntheticVitalsSource(seed: 7), seconds: 60)
-        let b = run(SyntheticVitalsSource(seed: 7), seconds: 60)
-
-        XCTAssertEqual(a.count, b.count)
-        XCTAssertEqual(a.map(\.sample.heartRate), b.map(\.sample.heartRate))
-        XCTAssertEqual(a.map(\.sample.motion), b.map(\.sample.motion))
-    }
-
-    func testResetRestartsTheRun() {
+    func testStartStreamsTheGeneratorsSamplesOnTheMainRunLoop() {
         let source = SyntheticVitalsSource(seed: 7)
-        let first = run(source, seconds: 30)
+        var expected = SyntheticVitalsGenerator(seed: 7)
+        var received: [VitalsSample] = []
+
+        let got = expectation(description: "samples")
+        source.onSample = { sample in
+            received.append(sample)
+            if received.count == 3 { got.fulfill() }
+        }
+
+        source.start()
+        XCTAssertTrue(source.isStreaming)
+        wait(for: [got], timeout: 5)
+        source.stop()
+        XCTAssertFalse(source.isStreaming)
+
+        // Same seed, same steps: the wrapper adds timing only, never changes values.
+        var replayed: [VitalsSample] = []
+        while replayed.count < 3 {
+            if let s = expected.advance(by: 1.0 / 20.0) { replayed.append(s) }
+        }
+        XCTAssertEqual(received.prefix(3).map(\.motion), replayed.map(\.motion))
+        XCTAssertEqual(received.prefix(3).map(\.timestamp), replayed.map(\.timestamp))
+    }
+
+    func testResetRewindsTheGenerator() {
+        let source = SyntheticVitalsSource(seed: 7)
+        source.start()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        source.stop()
+        XCTAssertGreaterThan(source.generator.elapsed, 0)
+
         source.reset()
-        let second = run(source, seconds: 30)
-
-        XCTAssertEqual(first.map(\.sample.heartRate), second.map(\.sample.heartRate))
+        XCTAssertEqual(source.generator.elapsed, 0)
     }
 
-    func testRatesRoughlyMatchAWatch() {
-        let source = SyntheticVitalsSource(seed: 1)
-        source.dropoutsEnabled = false
-        let samples = run(source, seconds: 120)
-
-        let hrCount = samples.filter { $0.sample.heartRate != nil }.count
-        let motionCount = samples.filter { $0.sample.motion != nil }.count
-
-        XCTAssertEqual(Double(hrCount) / 120, 1, accuracy: 0.2)      // ~1 Hz
-        XCTAssertEqual(Double(motionCount) / 120, 10, accuracy: 3)   // ~10 Hz
-    }
-
-    func testValuesStayInRange() {
-        let samples = run(SyntheticVitalsSource(seed: 3), seconds: 300)
-
-        for (_, s) in samples {
-            if let m = s.motion { XCTAssert((0...100).contains(m)) }
-            if let hr = s.heartRate { XCTAssert((80...200).contains(hr)) }
-        }
-    }
-
-    func testHeartRateLagsBehindEffort() {
-        // Effort swings within seconds; a lagging HR should swing far less
-        // than the HR that effort would map to instantly.
-        let source = SyntheticVitalsSource(seed: 5)
-        source.dropoutsEnabled = false
-        let samples = run(source, seconds: 80).filter { $0.t > 40 }   // skip warm-up from resting
-
-        let hrs = samples.compactMap(\.sample.heartRate)
-        let targets = samples.map {
-            source.restingHR + (source.maxHR - source.restingHR) * source.exertion(at: $0.t) / 100
-        }
-
-        let hrSwing = hrs.max()! - hrs.min()!
-        let targetSwing = targets.max()! - targets.min()!
-
-        XCTAssertLessThan(hrSwing, targetSwing * 0.5)
-    }
-
-    func testOutagesCreateGaps() {
-        let samples = run(SyntheticVitalsSource(seed: 11), seconds: 600)
-        let times = samples.map(\.t)
-        let longestGap = zip(times, times.dropFirst()).map { $1 - $0 }.max() ?? 0
-
-        XCTAssertGreaterThanOrEqual(longestGap, 2)
+    func testAppSharesTheEnginesScenarios() {
+        // Compile-level smoke test: the app target links DragonEngine's public API.
+        let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
+        XCTAssertEqual(engine.tick(dt: 0, at: 0).ops.isEmpty, false)
     }
 }

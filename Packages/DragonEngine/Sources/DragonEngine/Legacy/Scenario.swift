@@ -1,32 +1,53 @@
 //  Scenario.swift
 //  Context model — same data the HTML bench uses.
+//  Legacy: today's hand-authored demo scenarios, kept until the plan-driven pipeline replaces them.
 
 import Foundation
 
-enum Reveal { case glance, auto, dwell }   // auto = engine forces (safety-critical)
-enum Glyph { case arrow, warn, drop, clock, none }
+public enum Reveal { case glance, auto, dwell }   // auto = engine forces (safety-critical)
+public enum Glyph { case arrow, warn, drop, clock, none }
 
-struct ContextCard {
-    let id: String
-    let reveal: Reveal
-    let window: ClosedRange<Double>        // scenario seconds when relevant
-    let line1: String
-    let line2: String
-    let tag: String                        // NAV / ZONE / THRT ...
-    let glyph: Glyph
+public struct ContextCard {
+    public let id: String
+    public let reveal: Reveal
+    public let window: ClosedRange<Double>        // scenario seconds when relevant
+    public let line1: String
+    public let line2: String
+    public let tag: String                        // NAV / ZONE / THRT ...
+    public let glyph: Glyph
+
+    public init(id: String, reveal: Reveal, window: ClosedRange<Double>, line1: String, line2: String, tag: String, glyph: Glyph) {
+        self.id = id
+        self.reveal = reveal
+        self.window = window
+        self.line1 = line1
+        self.line2 = line2
+        self.tag = tag
+        self.glyph = glyph
+    }
 }
 
-struct Scenario {
-    let key: String
-    let name: String
-    let cards: [ContextCard]
-    let dashboard: [String]
+public struct Scenario {
+    public typealias Ambient = (MotionBand, Double, Int) -> (big: String, unit: String, sub: String)
+
+    public let key: String
+    public let name: String
+    public let cards: [ContextCard]
+    public let dashboard: [String]
     /// (band, speed-ish, hr) -> ambient base layer
-    let ambient: (MotionBand, Double, Int) -> (big: String, unit: String, sub: String)
+    public let ambient: Ambient
+
+    public init(key: String, name: String, cards: [ContextCard], dashboard: [String], ambient: @escaping Ambient) {
+        self.key = key
+        self.name = name
+        self.cards = cards
+        self.dashboard = dashboard
+        self.ambient = ambient
+    }
 }
 
-enum Scenarios {
-    static let cyclingTri = Scenario(
+public enum Scenarios {
+    public static let cyclingTri = Scenario(
         key: "tri", name: "CYCLING / TRI",
         cards: [
             ContextCard(id: "turn", reveal: .glance, window: 5...12,  line1: "TURN 200m", line2: "BEAR RIGHT", tag: "NAV",  glyph: .arrow),
@@ -38,7 +59,7 @@ enum Scenarios {
         ambient: { _, spd, hr in (big: String(format: "%.1f", spd * 0.34), unit: "MPH", sub: "HR \(hr)") }
     )
 
-    static let operatorSOF = Scenario(
+    public static let operatorSOF = Scenario(
         key: "sof", name: "OPERATOR / SOF",
         cards: [
             ContextCard(id: "wp",    reveal: .glance, window: 5...12,  line1: "WP2 140m",  line2: "AZ 047",     tag: "NAV",  glyph: .arrow),
@@ -50,5 +71,5 @@ enum Scenarios {
         ambient: { _, spd, _ in (big: String(format: "%03d", Int(40 + spd * 0.2)), unit: "AZ", sub: "WP2 \(max(20, Int(180 - spd)))m") }
     )
 
-    static let all = [cyclingTri, operatorSOF]
+    public static let all = [cyclingTri, operatorSOF]
 }

@@ -1,67 +1,72 @@
 //  AdaptiveEngine.swift
 //  Safe-zone adaptive HUD layout for real ActiveLook glasses.
 //  UI- and device-agnostic: emits HUDOps and consumes AttentionEvents.
+//  Clock-free: every call that cares about time takes run time `t`
+//  (seconds since run start, monotonic) from the caller.
 
 import Foundation
 
-enum MotionBand: Int {
+public enum MotionBand: Int, Sendable {
     case stationary, light, moderate, hard
 
-    var label: String {
+    /// Band for a 0–100 motion/exertion reading.
+    public init(motion: Double) {
+        switch motion {
+        case ..<6:
+            self = .stationary
+        case ..<38:
+            self = .light
+        case ..<72:
+            self = .moderate
+        default:
+            self = .hard
+        }
+    }
+
+    public var label: String {
         ["STATIONARY", "LIGHT", "MODERATE", "HARD"][rawValue]
     }
 }
 
-final class AdaptiveEngine {
-    private(set) var scenario: Scenario
-    var motion: Double = 0
+public final class AdaptiveEngine {
+    public private(set) var scenario: Scenario
+    public var motion: Double = 0
 
     /// Latest real HR reading, or nil when none is fresh.
-    var measuredHeartRate: Int?
+    public var measuredHeartRate: Int?
 
     /// Falls back to an estimate from motion when no reading is available.
-    var heartRate: Int { measuredHeartRate ?? Int(96 + motion * 0.92) }
+    public var heartRate: Int { measuredHeartRate ?? Int(96 + motion * 0.92) }
 
-    private(set) var attention: AttentionEvent = .idle
-    private var attnUntil = Date.distantPast
+    public private(set) var attention: AttentionEvent = .idle
+    private var attnUntil: TimeInterval?          // run time when attention falls back to idle
 
-    private(set) var active: ContextCard?
-    private var activeUntil = Date.distantPast
+    public private(set) var active: ContextCard?
+    private var activeUntil: TimeInterval = 0     // run time when the active card times out
     private var seen = Set<String>()
 
-    var running = false
-    private(set) var clock: Double = 0
-    private(set) var flywheel = 0
-    var onFlywheel: ((Int) -> Void)?
+    public var running = false
+    public private(set) var clock: Double = 0     // scenario seconds, loops at 40
+    public private(set) var flywheel = 0
+    public var onFlywheel: ((Int) -> Void)?
 
-    init(scenario: Scenario) {
+    public init(scenario: Scenario) {
         self.scenario = scenario
     }
 
-    var band: MotionBand {
-        switch motion {
-        case ..<6:
-            return .stationary
-        case ..<38:
-            return .light
-        case ..<72:
-            return .moderate
-        default:
-            return .hard
-        }
-    }
+    public var band: MotionBand { MotionBand(motion: motion) }
 
-    func setScenario(_ s: Scenario) {
+    public func setScenario(_ s: Scenario) {
         reset()
         scenario = s
     }
 
-    func reset() {
+    public func reset() {
         attention = .idle
-        attnUntil = .distantPast
+        attnUntil = nil
 
         active = nil
-        activeUntil = .distantPast
+        activeUntil = 0
         seen = []
 
         flywheel = 0
@@ -71,33 +76,34 @@ final class AdaptiveEngine {
 
     // MARK: - Attention
 
-    func handle(_ e: AttentionEvent) {
+    /// Applies an attention event that arrived at run time `t`.
+    public func handle(_ e: AttentionEvent, at t: TimeInterval) {
         attention = e
 
         guard e == .glance || e == .dwell else {
             return
         }
 
-        attnUntil = Date().addingTimeInterval(e == .dwell ? 2.6 : 1.5)
+        attnUntil = t + (e == .dwell ? 2.6 : 1.5)
 
         let want: [Reveal] = e == .dwell ? [.dwell, .glance] : [.glance]
 
         if let cue = scenario.cards.first(where: { want.contains($0.reveal) && $0.window.contains(clock) })
             ?? scenario.cards.first(where: { want.contains($0.reveal) && !seen.contains($0.id) }) {
-            surface(cue, drilled: e == .dwell)
+            surface(cue, drilled: e == .dwell, at: t)
         }
     }
 
-    private func surface(_ c: ContextCard, drilled: Bool) {
+    private func surface(_ c: ContextCard, drilled: Bool, at t: TimeInterval) {
         active = c
-        activeUntil = Date().addingTimeInterval(drilled ? 8 : 5)
+        activeUntil = t + (drilled ? 8 : 5)
         seen.insert(c.id)
     }
 
-    private func autoScan() {
+    private func autoScan(at t: TimeInterval) {
         for c in scenario.cards where c.reveal == .auto && c.window.contains(clock) {
             if active?.id != c.id {
-                surface(c, drilled: false)
+                surface(c, drilled: false, at: t)
                 attention = .idle
             }
         }
@@ -105,7 +111,9 @@ final class AdaptiveEngine {
 
     // MARK: - Tick
 
-    func tick(dt: Double) -> HUDFrame {
+    /// Advances the scenario clock by `dt` (when running), expires attention and
+    /// cards against run time `t`, and returns the frame to draw.
+    public func tick(dt: Double, at t: TimeInterval) -> HUDFrame {
         if running {
             clock += dt
 
@@ -115,19 +123,19 @@ final class AdaptiveEngine {
             }
         }
 
-        if attnUntil != .distantPast, Date() > attnUntil {
+        if let until = attnUntil, t > until {
             attention = .idle
-            attnUntil = .distantPast
+            attnUntil = nil
         }
 
-        if active != nil, Date() > activeUntil {
+        if active != nil, t > activeUntil {
             flywheel += 1
             onFlywheel?(flywheel)
             active = nil
         }
 
         if running {
-            autoScan()
+            autoScan(at: t)
         }
 
         return render()
@@ -135,7 +143,7 @@ final class AdaptiveEngine {
 
     // MARK: - Render
 
-    func render() -> HUDFrame {
+    public func render() -> HUDFrame {
         var f = HUDFrame()
         f.add(.clear)
         f.add(.luma([8, 11, 13, 15][band.rawValue]))

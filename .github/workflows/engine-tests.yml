@@ -1,0 +1,21 @@
+# Runs the DragonEngine package tests on every push and pull request.
+#
+# Only the Swift package is tested here. The iOS app is NOT built in CI: it
+# depends on the ActiveLook SDK as a local package at ../../ios-sdk, which
+# isn't checked out on the runner. Build and test the app locally in Xcode.
+
+name: Engine tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  engine-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Test DragonEngine
+        run: swift test --package-path Packages/DragonEngine

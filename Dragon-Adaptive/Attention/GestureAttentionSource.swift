@@ -7,6 +7,7 @@
 
 import Foundation
 import ActiveLookSDK
+import DragonEngine
 
 final class GestureAttentionSource: AttentionSource {
     var onEvent: ((AttentionEvent) -> Void)?
