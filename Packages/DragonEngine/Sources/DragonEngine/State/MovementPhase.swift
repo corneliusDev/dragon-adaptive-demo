@@ -3,8 +3,15 @@
 //  the motion effort score. One input to the capacity budget.
 //
 //      stopped   5 s speed under 0.8 m/s (or no speed and effort under 6)
-//      kick      in the last 400 m, with 10 s speed ≥ 5% above, or 3 s effort
-//                ≥ 5 points above, what the runner did over the 200 m before it
+//      kick      in the last 400 m, with speed or effort rising above what the
+//                runner did over the 200 m before it. Two tests, either will do:
+//                  level  10 s speed ≥ 5% above, or 3 s effort ≥ 5 points above,
+//                         the baseline (a clear, settled rise);
+//                  early  the last 4 s mean effort above the baseline by 3.5
+//                         standard errors (the baseline's own sample spread
+//                         over √n) and by at least 3 points: a rise still well
+//                         short of the level test's but already beyond noise,
+//                         so a ramp-up is caught sooner after it starts.
 //      surging   5 s speed ≥ 15% above the 60 s before the last 10 s: the rise
 //                happened within about 10 s. A surge held for longer becomes the
 //                new baseline and the phase settles back to steady.
@@ -88,6 +95,20 @@ public struct MovementPhaseClassifier: Sendable {
         /// Effort points above the baseline that count as a kick.
         public var kickEffortRise = 5.0
 
+        /// Early test, on effort only: window of "effort now". GPS speed is no
+        /// use here: its error wanders over tens of seconds, so a few seconds'
+        /// mean can sit 4–6% off for no reason.
+        public var kickEarlyEffortWindow: TimeInterval = 4
+        /// Standard errors above the baseline that count as rising.
+        public var kickEarlySigmas = 3.5
+        /// And never less than this many effort points: a runner's pace (so
+        /// effort) drifts by 2+ points on a steady finish. With 3.0, over 65
+        /// synthetic races (seeds 1–12 and 42) the early test adds one false kick
+        /// (130 m out) and catches the walkthrough's kick about 15 m sooner
+        /// (≈ 370 m to go instead of ≈ 355 m). 2.5 catches it a few metres sooner
+        /// still, with three times the false kicks.
+        public var kickEarlyEffortFloor = 3.0
+
         public init() {}
     }
 
@@ -145,7 +166,28 @@ public struct MovementPhaseClassifier: Sendable {
            e >= base + c.kickEffortRise {
             return true
         }
+
+        // Early: a small rise that is already beyond the baseline's noise.
+        let baseEfforts = MovementPhaseClassifier.window(efforts, from: first.t, to: last.t, t: \.t).map(\.value)
+        let nowEfforts = MovementPhaseClassifier.window(efforts, from: t - c.kickEarlyEffortWindow, to: t, t: \.t)
+            .map(\.value)
+        if MovementPhaseClassifier.isAbove(nowEfforts, baseline: baseEfforts, sigmas: c.kickEarlySigmas,
+                                           floor: { _ in c.kickEarlyEffortFloor }) {
+            return true
+        }
         return false
+    }
+
+    /// The mean of `now` is above the mean of `baseline` by at least `sigmas`
+    /// standard errors (baseline sample spread ÷ √count of `now`) and by at
+    /// least `floor(baseline mean)`. Needs 3 values in `now` and 10 in the baseline.
+    static func isAbove(_ now: [Double], baseline: [Double], sigmas: Double, floor: (Double) -> Double) -> Bool {
+        guard now.count >= 3, baseline.count >= 10 else { return false }
+        let base = baseline.reduce(0, +) / Double(baseline.count)
+        let variance = baseline.reduce(0) { $0 + ($1 - base) * ($1 - base) } / Double(baseline.count - 1)
+        let mean = now.reduce(0, +) / Double(now.count)
+        let margin = max(floor(base), sigmas * variance.squareRoot() / Double(now.count).squareRoot())
+        return mean >= base + margin
     }
 
     /// Flat-equivalent speed over the samples in (from, to]: mean Doppler speed
