@@ -98,4 +98,41 @@ public struct RunState: Sendable, Equatable {
     public var effort: MotionBand
     public var attention: AttentionEvent
     public var quality: DataQuality
+
+    /// Unknowns default to nil, so a test or a trigger can build just what it needs.
+    public init(elapsed: TimeInterval,
+                distance: Double,
+                pace30s: Double? = nil,
+                pace60s: Double? = nil,
+                gradeAdjustedPace: Double? = nil,
+                projectedFinish: TimeInterval? = nil,
+                gapToTarget: TimeInterval? = nil,
+                behindPlanNow: TimeInterval? = nil,
+                heartRate: Double? = nil,
+                heartZone: Int? = nil,
+                heartDrift: Double? = nil,
+                cadence: Double? = nil,
+                grade: Double? = nil,
+                ahead: Ahead? = nil,
+                effort: MotionBand = .stationary,
+                attention: AttentionEvent = .idle,
+                quality: DataQuality = DataQuality()) {
+        self.elapsed = elapsed
+        self.distance = distance
+        self.pace30s = pace30s
+        self.pace60s = pace60s
+        self.gradeAdjustedPace = gradeAdjustedPace
+        self.projectedFinish = projectedFinish
+        self.gapToTarget = gapToTarget
+        self.behindPlanNow = behindPlanNow
+        self.heartRate = heartRate
+        self.heartZone = heartZone
+        self.heartDrift = heartDrift
+        self.cadence = cadence
+        self.grade = grade
+        self.ahead = ahead
+        self.effort = effort
+        self.attention = attention
+        self.quality = quality
+    }
 }

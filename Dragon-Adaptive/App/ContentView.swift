@@ -80,7 +80,7 @@ struct ContentView: View {
                 Text("SYNTHETIC RACE").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
                 Spacer()
                 Menu {
-                    ForEach(SyntheticProfile.all, id: \.name) { profile in
+                    ForEach(SyntheticProfile.pickerProfiles, id: \.name) { profile in
                         Button(profile.displayName) { hud.setRaceProfile(profile) }
                     }
                 } label: {

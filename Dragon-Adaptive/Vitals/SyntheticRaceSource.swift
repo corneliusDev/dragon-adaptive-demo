@@ -63,6 +63,11 @@ final class SyntheticRaceSource: LocationSource {
 }
 
 extension SyntheticProfile {
+    /// The race picker: one of each, plus a fade that recovers (to see a pace cue clear).
+    static let pickerProfiles: [SyntheticProfile] = all + [
+        .slowFadeRecovery(from: 9 * DistanceUnit.metersPerMile, recoverAt: 10 * DistanceUnit.metersPerMile),
+    ]
+
     /// Picker label. Engine values are metres; miles/km formatting happens here.
     var displayName: String {
         switch self {
@@ -72,6 +77,9 @@ extension SyntheticProfile {
         case .hilly: return "Hilly"
         case .gpsDropout(let at, let duration): return String(format: "GPS dropout at %.0f km for %.0f s", at / 1000, duration)
         case .designWalkthrough: return "Design walkthrough (1:45 half)"
+        case .slowFadeRecovery(let from, let recoverAt):
+            return String(format: "Fade from mi %.0f, recover at mi %.0f",
+                          from / DistanceUnit.metersPerMile, recoverAt / DistanceUnit.metersPerMile)
         }
     }
 }

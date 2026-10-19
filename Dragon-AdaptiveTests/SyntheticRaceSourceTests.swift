@@ -53,3 +53,15 @@ final class SyntheticRaceSourceTests: XCTestCase {
         XCTAssertEqual(SyntheticProfile.slowFade(from: 9 * DistanceUnit.metersPerMile).displayName, "Slow fade from mi 9")
     }
 }
+
+final class RacePickerTests: XCTestCase {
+    func testPickerOffersEveryProfileAndTheRecoveringFadeWithDistinctLabels() {
+        let picker = SyntheticProfile.pickerProfiles
+        XCTAssertTrue(SyntheticProfile.all.allSatisfy(picker.contains))
+        XCTAssertEqual(Set(picker.map(\.displayName)).count, picker.count)
+        XCTAssertEqual(Set(picker.map(\.name)).count, picker.count, "the picker's ForEach ids")
+        XCTAssertEqual(SyntheticProfile.slowFadeRecovery(from: 9 * DistanceUnit.metersPerMile,
+                                                         recoverAt: 10 * DistanceUnit.metersPerMile).displayName,
+                       "Fade from mi 9, recover at mi 10")
+    }
+}

@@ -4,8 +4,8 @@
 
 import Foundation
 
-public enum Reveal { case glance, auto, dwell }   // auto = engine forces (safety-critical)
-public enum Glyph { case arrow, warn, drop, clock, none }
+public enum Reveal: Sendable { case glance, auto, dwell }   // auto = engine forces (safety-critical)
+public enum Glyph: Sendable { case arrow, warn, drop, clock, none }
 
 public struct ContextCard {
     public let id: String
