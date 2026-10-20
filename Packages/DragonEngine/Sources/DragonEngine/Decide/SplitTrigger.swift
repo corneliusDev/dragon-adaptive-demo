@@ -61,7 +61,7 @@ public struct SplitTrigger: Trigger {
     /// Furthest point reached so far (run time, metres).
     private var furthest: (t: TimeInterval, d: Double) = (0, 0)
     /// The course's climbs, for deferring splits to the crest.
-    private let hills: [Hill]
+    let hills: [Hill]
 
     public init(plan: RunPlan, config: Config = Config()) {
         self.plan = plan

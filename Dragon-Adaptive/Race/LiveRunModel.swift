@@ -9,7 +9,11 @@
 //      replay     a real run's RunRecording played back at 1x or 10x.
 //
 //  Everything goes through a RunEngine built from the plan, and the engine's
-//  frame goes to the phone mirror and (through `onFrame`) the glasses.
+//  presented frame (cues eased on and off by the plan's segue, its heads-ups
+//  drawn, the LED op included) goes to the phone mirror and (through
+//  `onFrame`) the glasses, each frame once. A heads-up starting with the
+//  plan's Watch tap on goes to `haptics` (the Watch, light or strong by the
+//  coming cue's priority).
 //
 //  Synthetic: the model owns race time. A Foundation timer ticks 20 times a
 //  second and each tick advances the race by tick × speed, in steps of at
@@ -115,6 +119,8 @@ final class LiveRunModel {
 
     /// Each new frame, for the glasses.
     @ObservationIgnored var onFrame: ((HUDFrame) -> Void)?
+    /// Where the Watch-tap heads-up goes (the plan's Watch tap on).
+    @ObservationIgnored var haptics: HeadsUpHaptics?
 
     @ObservationIgnored private(set) var engine: RunEngine
     @ObservationIgnored private var run: SyntheticRun?
@@ -132,15 +138,17 @@ final class LiveRunModel {
     @ObservationIgnored private var heldBackMarker = 0
 
     convenience init(plan: SavedPlan, profile: SyntheticProfile = .onPlan, timeScale: Double = 1,
-                     config: Config = Config()) {
-        self.init(plan: plan, feed: .synthetic(profile), timeScale: timeScale, config: config)
+                     config: Config = Config(), segueConfig: SegueConfig = SegueConfig()) {
+        self.init(plan: plan, feed: .synthetic(profile), timeScale: timeScale, config: config, segueConfig: segueConfig)
     }
 
-    init(plan: SavedPlan, feed: Feed, timeScale: Double = 1, config: Config = Config()) {
+    /// `segueConfig`: the app-wide segue tuning (the plan picks the segue and heads-ups).
+    init(plan: SavedPlan, feed: Feed, timeScale: Double = 1, config: Config = Config(),
+         segueConfig: SegueConfig = SegueConfig()) {
         self.plan = plan
         self.timeScale = timeScale
         self.config = config
-        let engineConfig = LiveRunModel.engineConfig(for: plan)
+        let engineConfig = LiveRunModel.engineConfig(for: plan, segues: segueConfig)
         switch feed {
         case .synthetic(let profile):
             kind = .synthetic
@@ -180,12 +188,16 @@ final class LiveRunModel {
         sensors?.stop()
     }
 
-    /// The engine's settings for a plan: its unit, display setting and name.
-    /// A replay uses the same, so it decides as the run did.
-    static func engineConfig(for plan: SavedPlan) -> RunEngine.Config {
+    /// The engine's settings for a plan: its unit, display setting, name,
+    /// segue and heads-ups (with the app's segue tuning). A replay uses the
+    /// same, so it decides as the run did.
+    static func engineConfig(for plan: SavedPlan, segues: SegueConfig = SegueConfig()) -> RunEngine.Config {
         var c = RunEngine.Config(unit: plan.unit)
         c.display = plan.display
         c.name = plan.name
+        c.segue = plan.segue
+        c.headsUp = plan.headsUp
+        c.segues = segues
         return c
     }
 
@@ -219,7 +231,9 @@ final class LiveRunModel {
         switch kind {
         case .synthetic:
             for event in run?.advance(by: 0) ?? [] { engine.ingest(event) }
-            publish(engine.update(at: 0))
+            let step = engine.update(at: 0)
+            noteHeadsUp(step)
+            publish(step)
         case .phone:
             status = Status(headline: "Starting", detail: "Waiting for the first GPS fix")
             sensors?.onEvent = { [weak self] event in self?.received(event) }
@@ -299,7 +313,10 @@ final class LiveRunModel {
                 finishTime = crossed
             }
             last = engine.update(at: raceTime)
-            if let step = last { noteHeldBack(step) }
+            if let step = last {
+                noteHeldBack(step)
+                noteHeadsUp(step)
+            }
         }
         if let last { publish(last) }
         if isFinished && afterFinish >= config.afterFinish { pause() }
@@ -336,6 +353,7 @@ final class LiveRunModel {
             }
             let step = engine.update(at: update.t)
             noteHeldBack(step)
+            noteHeadsUp(step)
             last = step
         }
         if finishTime == nil, let crossed = engine.log.header.finishTime { finishTime = crossed }
@@ -389,13 +407,20 @@ final class LiveRunModel {
 
     private func publish(_ step: RunEngine.Step) {
         state = step.state
-        let drawn = engine.frame()
+        // What the glasses show now: mid-segue frames and the heads-up included.
+        let drawn = engine.presentedFrame
         if drawn.signature != frame.signature {
             frame = drawn
             onFrame?(drawn)
         }
         cuesShown = engine.log.appearances.count
         status = Self.status(step: step, current: engine.current, finishTime: finishTime)
+    }
+
+    /// A heads-up starting with the plan's Watch tap on: tap the wrist (not on a replay).
+    private func noteHeadsUp(_ step: RunEngine.Step) {
+        guard kind != .replay, step.headsUpBegan, let signal = step.headsUp, plan.headsUp.contains(.watchTap) else { return }
+        haptics?.headsUp(signal)
     }
 
     /// The latest cue held back, kept until the runner reaches the next marker.

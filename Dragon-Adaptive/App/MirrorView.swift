@@ -1,6 +1,8 @@
 //  MirrorView.swift
 //  Renders the same HUDFrame on the phone.
 //  This is a safe-zone mirror, not a pixel-perfect ActiveLook firmware renderer.
+//  The frame's luma dims the whole mirror (so a glow segue shows), and an LED
+//  op lights a small dot in the corner (the heads-up's LED blink).
 
 import SwiftUI
 import DragonEngine
@@ -18,8 +20,12 @@ struct MirrorView: View {
                 CGPoint(x: CGFloat(x) * sx, y: CGFloat(y) * sy)
             }
 
+            // Display brightness: the glasses' luma, kept readable on the phone.
+            let luma = frame.ops.reduce(15.0) { l, op in if case .luma(let v) = op { return Double(v) } else { return l } }
+            let brightness = 0.35 + 0.65 * min(15, luma) / 15
+
             func col(_ c: UInt8) -> Color {
-                phos.opacity(Double(c) / 15.0)
+                phos.opacity(Double(c) / 15.0 * brightness)
             }
 
             ctx.fill(
@@ -45,6 +51,13 @@ struct MirrorView: View {
                 switch op {
                 case .clear, .luma:
                     break
+
+                case .led(let state):
+                    if state != .off {
+                        let r = 4 * sx
+                        ctx.fill(Path(ellipseIn: CGRect(x: 6 * sx, y: 6 * sy, width: 2 * r, height: 2 * r)),
+                                 with: .color(phos))
+                    }
 
                 case .line(let x0, let y0, let x1, let y1, let c):
                     var p = Path()

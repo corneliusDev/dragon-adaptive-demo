@@ -24,6 +24,8 @@ struct DeveloperView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showCourseDebug = false
     @State private var showGallery = false
+    /// The SEGUES debug sheet (opens at launch with -segues, for screenshots).
+    @State private var showSegues = ProcessInfo.processInfo.arguments.contains("-segues")
     private let amber = Color(red: 1, green: 0.54, blue: 0.24)
     private let phos  = Color(red: 57/255, green: 226/255, blue: 122/255)
     private let bench = Color(red: 0.06, green: 0.08, blue: 0.075)
@@ -48,6 +50,8 @@ struct DeveloperView: View {
                     Button("COURSE DEBUG") { showCourseDebug = true }
                     Button("SCREEN GALLERY") { showGallery = true }
                         .accessibilityIdentifier("screenGalleryButton")
+                    Button("SEGUES") { showSegues = true }
+                        .accessibilityIdentifier("seguesButton")
                 }
                 .font(.system(size: 11, design: .monospaced)).foregroundColor(.gray)
                 #endif
@@ -74,6 +78,7 @@ struct DeveloperView: View {
         }
         #if DEBUG
         .sheet(isPresented: $showGallery, onDismiss: { hud.resumeLiveHUD() }) { ScreenGalleryView(hud: hud) }
+        .sheet(isPresented: $showSegues, onDismiss: { hud.resumeLiveHUD() }) { SeguesView(hud: hud) }
         #endif
     }
 

@@ -8,8 +8,10 @@
 //      motion    WristMotionMonitor's effort score, once a second.
 //      state     each workout state change (running, paused, ended…), so
 //                the phone knows; ending here ends the phone's run.
-//      commands  from the phone (startWorkout / endWorkout), by either
-//                route, de-duplicated by WatchMessageFilter.
+//      commands  from the phone (startWorkout / endWorkout, and the
+//                heads-up taps tapLight / tapStrong, played on the wrist by
+//                WatchTapHandler), by either route, de-duplicated by
+//                WatchMessageFilter.
 //
 //  Every message is a DragonEngine WatchMessage (v1), numbered by one
 //  WatchMessageSequencer per workout, sent by PhoneLink.
@@ -45,6 +47,8 @@ final class WorkoutManager: NSObject, ObservableObject {
     private var builder: HKLiveWorkoutBuilder?
     private var sequencer = WatchMessageSequencer(session: UUID().uuidString)
     private var commands = WatchMessageFilter()
+    /// Plays the phone's heads-up taps.
+    private let taps = WatchTapHandler(player: DeviceHaptics())
     private var syntheticTimer: Timer?
     private var generator = SyntheticVitalsGenerator(seed: 7)
     private var lastSyntheticEffortAt = Date.distantPast
@@ -181,6 +185,7 @@ final class WorkoutManager: NSObject, ObservableObject {
         switch c {
         case .startWorkout: start()
         case .endWorkout: end()
+        case .tapLight, .tapStrong: taps.handle(c, sentAt: m.sentAt, now: Date().timeIntervalSince1970)
         }
     }
 

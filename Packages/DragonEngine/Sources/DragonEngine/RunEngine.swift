@@ -29,6 +29,17 @@
 //      engine.finish(at: t)               // across the line (else noticed by position)
 //      try engine.log.jsonLines()         // save the cue log
 //
+//  Segues and heads-ups (chunk 14): the step's `frame` is the target (the
+//  renderer's frame for the cue); `presented` is what to send the glasses
+//  now, with the change between cues eased by the Segue setting (Presenter)
+//  and the heads-up drawn over it. Predictable cues are announced ahead from
+//  their triggers' Upcoming hints, so their heads-up runs the lead before
+//  they appear; the arbiter keeps a quiet gap between cues.
+//
+//      engine.segue = .slide; engine.headsUp = [.dotPulse, .ledBlink]
+//      if let frame = step.presented { backend.apply(frame) }
+//      if step.headsUpBegan, let h = step.headsUp { watch.tap(h) }
+//
 //  A value like StateEstimator; it never reads the clock.
 
 import Foundation
@@ -55,6 +66,13 @@ public struct RunEngine {
         public var display = DisplaySetting.balanced
         /// Miles or kilometres, for splits, paces and the distances drawn.
         public var unit: DistanceUnit
+        /// How cues ease on and off; RunEngine.segue changes it later.
+        public var segue = Segue.default
+        /// What warns of a predictable cue (empty: Off); RunEngine.headsUp changes it later.
+        public var headsUp = HeadsUpKind.defaultSetting
+        /// Segue and heads-up timings. The arbiter's quiet gap and heads-up lead
+        /// come from here (overriding `arbiter`'s).
+        public var segues = SegueConfig()
 
         /// Splits and paces in `unit`.
         public init(unit: DistanceUnit = .miles) {
@@ -80,6 +98,31 @@ public struct RunEngine {
         public var situation: Capacity.Situation
         /// The frame to send, when it differs from the last one a step carried; nil when unchanged.
         public var frame: HUDFrame?
+        /// The frame to show now — mid-change or settled, with the heads-up
+        /// over it — when it differs from the last one presented; nil when unchanged.
+        public var presented: HUDFrame?
+        /// The heads-up running, if any.
+        public var headsUp: HeadsUpSignal?
+        /// The heads-up began on this step (for the Watch tap).
+        public var headsUpBegan: Bool
+    }
+
+    /// A heads-up: which cue is coming, how much it matters and when it should appear.
+    public struct HeadsUpSignal: Sendable, Equatable {
+        public var key: CueKey
+        /// Run time it began.
+        public var since: TimeInterval
+        /// Run time the cue is due on screen.
+        public var dueAt: TimeInterval
+        /// The coming cue's priority (the Watch tap is strong for critical and safety).
+        public var priority: Priority
+
+        public init(key: CueKey, since: TimeInterval, dueAt: TimeInterval, priority: Priority = .advisory) {
+            self.key = key
+            self.since = since
+            self.dueAt = dueAt
+            self.priority = priority
+        }
     }
 
     public let plan: RunPlan
@@ -104,6 +147,17 @@ public struct RunEngine {
     public private(set) var logger: CueLogger
     /// Signature of the last frame a step carried.
     private var sentSignature: String?
+    /// Plays the changes between cues and draws the heads-up.
+    public private(set) var presentation: Presentation
+    /// The frame presented by the latest update.
+    public private(set) var presentedFrame = HUDFrame()
+    private var presentedSignature: String?
+    /// The predictable cues the triggers expect next (latest update).
+    public private(set) var upcoming: [Upcoming] = []
+    /// The heads-up running after the latest update.
+    public private(set) var headsUpSignal: HeadsUpSignal?
+    /// Recent (run time, distance), for the pace hints are timed at.
+    private var recent: [(t: TimeInterval, d: Double)] = []
     /// Glances and held looks not answered yet, oldest first.
     private var requests: [AttentionSample] = []
     /// Run time the runner crossed the line, once the engine has acted on it.
@@ -117,6 +171,33 @@ public struct RunEngine {
     public var displaySetting: DisplaySetting {
         get { capacity.setting }
         set { capacity.setting = newValue }
+    }
+
+    /// How cues ease on and off; the next change uses it.
+    public var segue: Segue {
+        get { presentation.segue }
+        set { presentation.segue = newValue }
+    }
+
+    /// What warns of a predictable cue; empty turns heads-ups off (and the
+    /// arbiter stops holding predictable cues for them).
+    public var headsUp: Set<HeadsUpKind> {
+        get { presentation.headsUp }
+        set {
+            presentation.headsUp = newValue
+            arbiter.config.headsUpLead = newValue.isEmpty ? 0 : presentation.config.headsUpLead
+        }
+    }
+
+    /// Segue and heads-up timings (the developer screen's sliders).
+    public var segueConfig: SegueConfig {
+        get { presentation.config }
+        set {
+            presentation.config = newValue
+            arbiter.config.quietGap = newValue.quietGap
+            arbiter.config.headsUpTolerance = newValue.headsUpTolerance
+            arbiter.config.headsUpLead = presentation.headsUp.isEmpty ? 0 : newValue.headsUpLead
+        }
     }
 
     /// Effort score (0–100) the budget uses instead of the measured one; nil
@@ -136,7 +217,12 @@ public struct RunEngine {
         kickClock = KickClockTrigger(plan: plan, config: config.kickClock)
         onDemand = OnDemandTrigger(plan: plan, config: config.onDemand)
         finishLine = FinishTrigger(plan: plan, config: config.finish)
-        arbiter = Arbiter(config: config.arbiter)
+        var arbiterConfig = config.arbiter
+        arbiterConfig.quietGap = config.segues.quietGap
+        arbiterConfig.headsUpLead = config.headsUp.isEmpty ? 0 : config.segues.headsUpLead
+        arbiterConfig.headsUpTolerance = config.segues.headsUpTolerance
+        arbiter = Arbiter(config: arbiterConfig)
+        presentation = Presentation(segue: config.segue, headsUp: config.headsUp, config: config.segues)
         capacity = Capacity(config: config.capacity, setting: config.display, raceDistance: plan.distanceMeters)
         logger = CueLogger(header: CueLog.Header(name: config.name, targetTime: plan.targetTime,
                                                  distance: plan.distanceMeters, display: config.display),
@@ -187,8 +273,9 @@ public struct RunEngine {
                 + fuel.evaluate(state: s, at: t) + formFade.evaluate(state: s, at: t)
                 + kickClock.evaluate(state: s, at: t)
             for request in requests {
-                if let cue = formFade.answer(request.event, at: t)
+                if var cue = formFade.answer(request.event, at: t)
                     ?? onDemand.answer(request.event, state: s, splits: split.splits, at: t) {
+                    cue.requested = true            // asked for: appears at once
                     proposed.append(cue)
                 }
             }
@@ -197,6 +284,7 @@ public struct RunEngine {
         proposed += finishLine.evaluate(state: s, at: t)
         let situation = capacity.situation(for: s, effort: effortOverride)
         let budget = capacity.budget(for: s, at: t, effort: effortOverride)
+        announceUpcoming(state: s, budget: budget, at: t)
         let (shown, decisions) = arbiter.decide(proposed, budget: budget, at: t, distance: s.distance)
         self.budget = budget
         logger.record(decisions, cues: arbiter.decided, state: s, budget: budget, situation: situation, at: t)
@@ -204,8 +292,61 @@ public struct RunEngine {
         let drawn = frame()
         let changed = drawn.signature != sentSignature
         if changed { sentSignature = drawn.signature }
+
+        // The heads-up running, and the frame to show now.
+        let before = headsUpSignal
+        headsUpSignal = arbiter.headsUp(at: t).map { h in
+            // The cue's priority: waiting in the arbiter, or as its trigger forecast it.
+            let priority = arbiter.waiting.first { $0.key == h.key }?.priority
+                ?? upcoming.first { $0.key == h.key }?.priority ?? before.flatMap { $0.key == h.key ? $0.priority : nil }
+                ?? .advisory
+            return HeadsUpSignal(key: h.key, since: h.since, dueAt: h.since + presentation.config.headsUpLead,
+                                 priority: priority)
+        }
+        let began = headsUpSignal.map { now in before.map { $0.key != now.key || $0.since != now.since } ?? true } ?? false
+        presentedFrame = presentation.frame(target: drawn, cue: shown, headsUpSince: headsUpSignal?.since, at: t)
+        let presentedChanged = presentedFrame.signature != presentedSignature
+        if presentedChanged { presentedSignature = presentedFrame.signature }
         return Step(state: s, proposed: proposed, current: shown, decisions: decisions,
-                    budget: budget, situation: situation, frame: changed ? drawn : nil)
+                    budget: budget, situation: situation, frame: changed ? drawn : nil,
+                    presented: presentedChanged ? presentedFrame : nil,
+                    headsUp: headsUpSignal, headsUpBegan: began)
+    }
+
+    /// Starts the heads-up of each predictable cue its trigger expects within
+    /// the lead (from when the screen can take it), if the budget would let it
+    /// show. It starts the lead less the tolerance ahead: a cue a little later
+    /// than forecast (or seen an update late) still lands within the
+    /// tolerance, and one a little early waits out the rest of its lead.
+    private mutating func announceUpcoming(state s: RunState, budget: Budget, at t: TimeInterval) {
+        recent.append((t, s.distance))
+        recent.removeAll { t - $0.t > 10 }
+        guard finishedAt == nil else { upcoming = []; return }
+        let within = presentation.config.announceWithin
+        let pace = currentPace(s)
+        upcoming = split.upcoming(state: s, at: t, pace: pace, within: within) + paceGap.upcoming(at: t)
+            + fuel.upcoming(at: t) + terrain.upcoming(state: s, at: t, pace: pace, within: within)
+            + kickClock.upcoming(state: s, at: t, pace: pace, within: within)
+        let lead = arbiter.config.headsUpLead - arbiter.config.headsUpTolerance
+        guard arbiter.config.headsUpLead > 0 else { return }
+        // Updates coarser than the tolerance can't hit the moment: announce on
+        // the last update before it (the arbiter allows one update's slack).
+        let interval = recent.count > 1 ? t - recent[recent.count - 2].t : 0
+        let coarse = interval > 2 * arbiter.config.headsUpTolerance
+        for hint in upcoming where budget.admits(hint.priority) {
+            let free = arbiter.freeAt(priority: hint.priority, key: hint.key, interrupts: budget.allowInterrupt, at: t)
+            let at = max(hint.expectedAt, free) - lead
+            if t >= at || coarse && t + interval > at { arbiter.announce(hint.key, at: t) }
+        }
+    }
+
+    /// Seconds per metre over the last few seconds of estimated distance (what
+    /// the split trigger crosses markers on), else the rolling pace, else the plan's.
+    private func currentPace(_ s: RunState) -> Double {
+        if let first = recent.first, let last = recent.last, last.t - first.t >= 2, last.d > first.d {
+            return (last.t - first.t) / (last.d - first.d)
+        }
+        return s.pace30s ?? s.pace60s ?? plan.targetPace(at: s.distance)
     }
 
     /// The chosen cue (or the quiet status dot; nothing once the race is over),

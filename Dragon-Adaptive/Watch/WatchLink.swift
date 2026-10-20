@@ -12,13 +12,17 @@
 //      start    HKHealthStore.startWatchApp(with:) (asks Health first);
 //               if that fails, a startWorkout command over WatchConnectivity.
 //      end      an endWorkout command by every route that's up.
+//      tap      a heads-up's Watch tap (tapLight / tapStrong), by `send`.
+//               `canTap` says whether there is a Watch to tap: reachable
+//               now, or paired with the Dragon app installed (the run's
+//               START opens it).
 
 import Foundation
 import Observation
 import DragonEngine
 
 @Observable
-final class WatchLink: WatchTransport, WatchWorkoutControlling {
+final class WatchLink: WatchTransport, WatchWorkoutControlling, WatchCommandSending, WatchAvailability {
     /// One message as it arrived, for the Developer menu.
     struct Receipt: Identifiable, Equatable {
         let id: Int
@@ -68,6 +72,12 @@ final class WatchLink: WatchTransport, WatchWorkoutControlling {
     var isMirroring: Bool { mirroring.isReachable }
     var isConnectivityReachable: Bool { connectivity.isReachable }
 
+    /// A Watch is there to tap: reachable now, or paired with the app installed.
+    var canTap: Bool {
+        _ = tick
+        return isReachable || ((connectivity as? WatchConnectivityTransport)?.isPairedWithApp ?? false)
+    }
+
     /// "Mirrored workout" / "Watch app reachable" / "Watch not reachable".
     var statusText: String {
         _ = tick
@@ -82,6 +92,7 @@ final class WatchLink: WatchTransport, WatchWorkoutControlling {
         return connectivity.send(data)
     }
 
+    @discardableResult
     func send(_ command: WatchCommand) -> Bool {
         let data = sequencer.message(.command(command), sentAt: Date().timeIntervalSince1970).encoded()
         return send(data)

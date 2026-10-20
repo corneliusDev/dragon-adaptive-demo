@@ -11,14 +11,49 @@
 //  - Font limits (largest font, characters per font, advance) come from
 //    DragonEngine's HUDFont, the same source the Renderer fits text to.
 //
+//  Smoother swaps (chunk 14):
+//  - Every frame is drawn inside holdFlush(.HOLD) … holdFlush(.FLUSH), so it
+//    appears at once instead of op by op.
+//  - The SDK doesn't hold clear(), so a frame's .clear is drawn as a black
+//    filled rectangle over the whole display instead.
+//  - Only what changed is redrawn when FrameDiff can patch the last frame
+//    into the next; otherwise the whole frame.
+//  - .led ops (heads-up) map to led(state:), sent only when the state changes.
+//  - The commands go through GlassesCommands, which the SDK's Glasses
+//    implements and tests fake.
+//
 
 import Foundation
 import ActiveLookSDK
 import DragonEngine
 
+/// The ActiveLook calls the backend makes: the SDK's Glasses, or a test recorder.
+protocol GlassesCommands: AnyObject {
+    func clear()
+    func luma(level: UInt8)
+    func color(level: UInt8)
+    func line(x0: Int16, x1: Int16, y0: Int16, y1: Int16)
+    func rect(x0: Int16, x1: Int16, y0: Int16, y1: Int16)
+    func rectf(x0: Int16, x1: Int16, y0: Int16, y1: Int16)
+    func circ(x: Int16, y: Int16, radius: UInt8)
+    func circf(x: Int16, y: Int16, radius: UInt8)
+    func txt(x: Int16, y: Int16, rotation: TextRotation, font: UInt8, color: UInt8, string: String)
+    func holdFlush(holdFlush: HoldFlushAction)
+    func led(state: LedState)
+    func power(on: Bool)
+}
+
+extension Glasses: GlassesCommands {}
+
 final class GlassesBackend {
-    private weak var glasses: Glasses?
+    private weak var glasses: GlassesCommands?
     private var lastSignature = ""
+    /// The frame on the glasses, for redrawing only what changed; nil = unknown (redraw whole).
+    private var lastFrame: HUDFrame?
+    /// The LED state last sent.
+    private var ledState = HUDLed.off
+    /// Redraw only what changed (FrameDiff); off sends every frame whole.
+    var partialRedraw = true
 
     // ActiveLook physical display is 304 × 256.
     // Keep live HUD content away from the edges.
@@ -42,8 +77,14 @@ final class GlassesBackend {
         print("[GlassesBackend] init with glasses: \(glasses.name)")
     }
 
+    /// For tests: any GlassesCommands (kept weakly, like the glasses).
+    init(commands: GlassesCommands) {
+        self.glasses = commands
+    }
+
     func invalidate() {
         lastSignature = ""
+        lastFrame = nil
     }
 
     func apply(_ frame: HUDFrame) {
@@ -57,15 +98,23 @@ final class GlassesBackend {
         }
 
         lastSignature = frame.signature
-        print("[GlassesBackend] sending frame with \(frame.ops.count) ops")
+        // Only what changed, when that is safe; else the whole frame.
+        let ops = (partialRedraw ? lastFrame.flatMap { FrameDiff.patch(from: $0, to: frame) } : nil) ?? frame.ops
+        lastFrame = frame
 
-        for op in frame.ops {
+        g.holdFlush(holdFlush: .HOLD)
+        for op in ops {
             switch op {
             case .clear:
-                g.clear()
+                // clear() isn't held: black out the whole display instead.
+                g.color(level: 0)
+                g.rectf(x0: 0, x1: Int16(Display.w - 1), y0: 0, y1: Int16(Display.h - 1))
 
             case .luma(let level):
                 g.luma(level: level)
+
+            case .led:
+                break
 
             case .line(let x0, let y0, let x1, let y1, let color):
                 g.color(level: color)
@@ -122,6 +171,14 @@ final class GlassesBackend {
                 )
             }
         }
+        g.holdFlush(holdFlush: .FLUSH)
+
+        // The LED: the frame's state (off without an .led op), sent when it changes.
+        let led = FrameDiff.led(frame)
+        if led != ledState {
+            ledState = led
+            g.led(state: led == .blink ? .blink : led == .on ? .on : .off)
+        }
     }
 
     // MARK: - Calibration / diagnostics
@@ -134,7 +191,7 @@ final class GlassesBackend {
 
         print("[GlassesBackend] sending calibration pattern")
 
-        lastSignature = ""
+        invalidate()
 
         g.power(on: true)
         g.clear()
@@ -185,7 +242,7 @@ final class GlassesBackend {
 
         print("[GlassesBackend] sending test pattern")
 
-        lastSignature = ""
+        invalidate()
 
         g.power(on: true)
         g.clear()
@@ -206,7 +263,7 @@ final class GlassesBackend {
     // MARK: - Text
 
     private func drawText(
-        glasses g: Glasses,
+        glasses g: GlassesCommands,
         x: Int,
         y: Int,
         font: HUDFont,
@@ -240,7 +297,7 @@ final class GlassesBackend {
     }
 
     private func drawRawText(
-        _ g: Glasses,
+        _ g: GlassesCommands,
         x: Int,
         y: Int,
         font: UInt8,

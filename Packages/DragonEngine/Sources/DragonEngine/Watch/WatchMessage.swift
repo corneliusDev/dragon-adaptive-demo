@@ -14,7 +14,15 @@
 //      kind     hr      heart rate: `value` bpm, taken at `at`
 //               effort  wrist-motion effort score 0–100 over the second ending `at`
 //               state   the Watch workout's state (`state`) as of `at`
-//               command phone → Watch: `command` (start / end the workout)
+//               command phone → Watch: `command` (start / end the workout,
+//                       or a heads-up tap on the wrist: tapLight / tapStrong)
+//
+//  The Watch taps (chunk 14) are new `command` values inside version 1, not a
+//  version 2: every other field and kind is unchanged, so a phone and Watch
+//  of this build still read all of each other's messages, and an older
+//  Watch build that gets a tap rejects just that message cleanly
+//  (WatchMessageError.invalidValue: an unknown command) and carries on with
+//  the rest. A tap is worth nothing late, so nothing is lost by dropping it.
 //
 //  Times are wall-clock seconds since 1970 because the two devices share no
 //  other clock; the phone turns them into its own run time (the engine never
@@ -38,6 +46,19 @@ public enum WatchSessionState: String, Sendable, Codable, CaseIterable {
 public enum WatchCommand: String, Sendable, Codable, CaseIterable {
     case startWorkout
     case endWorkout
+    /// A light tap on the wrist: an advisory or info cue is coming (heads-up).
+    case tapLight
+    /// A strong tap: a critical or safety cue is coming.
+    case tapStrong
+
+    /// The haptic this command plays on the Watch; nil for the workout commands.
+    public var haptic: WatchHaptic? {
+        switch self {
+        case .tapLight: return .light
+        case .tapStrong: return .strong
+        case .startWorkout, .endWorkout: return nil
+        }
+    }
 }
 
 public enum WatchMessageError: Error, Equatable {

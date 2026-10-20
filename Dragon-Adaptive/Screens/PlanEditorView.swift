@@ -1,7 +1,9 @@
 //  PlanEditorView.swift
 //  The race plan screen (design: "Before the race"): name, distance and
-//  target, pacing style, course file, heart rate zones, fuel, and how much
-//  the glasses should show. All checking is in PlanEditorModel; this lays it
+//  target, pacing style, course file, heart rate zones, fuel, how much the
+//  glasses should show, and how cues come onto them (segue and heads-ups,
+//  each with a PREVIEW that loops a sample cue on the in-editor mirror and
+//  the glasses until STOP). All checking is in PlanEditorModel; this lays it
 //  out like the mockup and shows its messages.
 
 import SwiftUI
@@ -10,6 +12,8 @@ import DragonEngine
 
 struct PlanEditorView: View {
     @Bindable var model: PlanEditorModel
+    /// PREVIEW's player: its frame is the in-editor mirror (the model starts and stops it).
+    @ObservedObject var preview: SeguePreviewController = SeguePreviewController(hud: nil)
     var onBack: () -> Void = {}
     /// Saved; the plan.
     var onSave: (SavedPlan) -> Void = { _ in }
@@ -25,6 +29,7 @@ struct PlanEditorView: View {
     @FocusState private var focused: Bool
 
     var body: some View {
+        ScrollViewReader { scroller in
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 TopBar {
@@ -130,6 +135,9 @@ struct PlanEditorView: View {
                               selection: $model.display, idPrefix: "display")
                 }
 
+                segueSection
+
+
                 if !model.problems.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(model.problems, id: \.self) { p in
@@ -149,13 +157,30 @@ struct PlanEditorView: View {
             }
             .padding(16)
         }
+        .onAppear {
+            #if DEBUG
+            // -planEditorSegues (screenshots): straight to the segue section; with -seguePreview, playing Slide.
+            let args = ProcessInfo.processInfo.arguments
+            if args.contains("-planEditorSegues") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    scroller.scrollTo("segueSection", anchor: .top)
+                    if args.contains("-seguePreview") {
+                        model.segue = .slide
+                        model.previewSegue()
+                    }
+                }
+            }
+            #endif
+        }
+        }
+        .onDisappear { model.stopPreview() }
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
-                Button("SAVE") { focused = false; if let p = save(model) { onSave(p) } }
+                Button("SAVE") { focused = false; model.stopPreview(); if let p = save(model) { onSave(p) } }
                     .buttonStyle(CTAButtonStyle(ghost: true))
                     .accessibilityIdentifier("savePlanButton")
-                Button("START RUN") { focused = false; if let p = save(model) { onStart(p) } }
+                Button("START RUN") { focused = false; model.stopPreview(); if let p = save(model) { onStart(p) } }
                     .buttonStyle(CTAButtonStyle())
                     .accessibilityIdentifier("startRunButton")
             }
@@ -210,6 +235,117 @@ struct PlanEditorView: View {
                 }
             }
             .font(Theme.mono(11, weight: .semibold)).foregroundColor(Theme.phos).padding(.top, 2)
+        }
+    }
+
+    // MARK: Segue and heads-ups
+
+    private var segueSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if model.isPreviewing {
+                VStack(alignment: .leading, spacing: 6) {
+                    HUDPanel(frame: preview.frame)
+                        .accessibilityIdentifier("seguePreviewMirror")
+                    HStack {
+                        Text("PREVIEW · \(model.previewing ?? "")")
+                            .font(Theme.mono(11)).foregroundColor(Theme.amber)
+                            .accessibilityIdentifier("seguePreviewLabel")
+                        Spacer()
+                        Button("STOP") { model.stopPreview() }
+                            .font(Theme.mono(11, weight: .semibold)).foregroundColor(Theme.amber)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.amber.opacity(0.5)))
+                            .accessibilityIdentifier("seguePreviewStop")
+                    }
+                }
+            }
+
+            Field(label: "Cues come on") {
+                Segmented(options: Segue.allCases.map { (Self.segueLabel($0), $0) }, selection: $model.segue,
+                          idPrefix: "segue")
+                HStack(alignment: .top) {
+                    Text(Self.segueNote(model.segue))
+                        .font(.system(size: 12)).foregroundColor(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    previewButton("segue") { model.previewSegue() }
+                }
+            }
+
+            Field(label: "Heads-up" + (model.headsUp.isEmpty ? " · off" : "")) {
+                ForEach(HeadsUpKind.allCases, id: \.self) { kind in
+                    let usable = kind != .watchTap || model.watchTapAvailable
+                    HStack(spacing: 10) {
+                        Toggle(isOn: Binding(get: { model.isOn(kind) }, set: { model.setHeadsUp(kind, on: $0) })) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(Self.headsUpLabel(kind)).font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(usable ? Theme.ink : Theme.muted)
+                                Text(Self.headsUpNote(kind)).font(.system(size: 11)).foregroundColor(Theme.muted)
+                            }
+                        }
+                        .tint(Theme.phos)
+                        .disabled(!usable && !model.isOn(kind))
+                        .accessibilityIdentifier("headsUp.\(kind.rawValue)")
+                        previewButton("headsUp.\(kind.rawValue)") { model.previewHeadsUp(kind) }
+                            .disabled(!usable)
+                            .opacity(usable ? 1 : 0.35)
+                    }
+                }
+                if let note = model.watchTapNote {
+                    Text(note).font(.system(size: 12)).foregroundColor(Theme.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("watchTapNote")
+                }
+                Text("A heads-up warns a moment before a cue you can see coming (a split, a hill, a gel). Safety cues always cut straight in.")
+                    .font(.system(size: 12)).foregroundColor(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .id("segueSection")
+    }
+
+    private func previewButton(_ id: String, _ action: @escaping () -> Void) -> some View {
+        Button("PREVIEW", action: action)
+            .font(Theme.mono(11, weight: .semibold)).foregroundColor(Theme.phos)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.line))
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("preview.\(id)")
+    }
+
+    static func segueLabel(_ segue: Segue) -> String {
+        switch segue {
+        case .instant: return "Instant"
+        case .fade: return "Fade"
+        case .slide: return "Slide"
+        case .glow: return "Glow"
+        }
+    }
+
+    static func segueNote(_ segue: Segue) -> String {
+        switch segue {
+        case .instant: return "Cues cut in and out in one frame."
+        case .fade: return "Cues fade in over about 0.3 s and out over 0.5 s."
+        case .slide: return "Cues rise a few pixels into place as they fade in, and sink as they leave."
+        case .glow: return "The whole display brightens as a cue arrives and dims as it leaves."
+        }
+    }
+
+    static func headsUpLabel(_ kind: HeadsUpKind) -> String {
+        switch kind {
+        case .dotPulse: return "Dot pulse"
+        case .edgeTick: return "Edge tick"
+        case .ledBlink: return "LED blink"
+        case .watchTap: return "Watch tap"
+        }
+    }
+
+    static func headsUpNote(_ kind: HeadsUpKind) -> String {
+        switch kind {
+        case .dotPulse: return "The status dot brightens"
+        case .edgeTick: return "A mark fills at the bottom edge"
+        case .ledBlink: return "The glasses' green LED blinks"
+        case .watchTap: return "A tap on the wrist; stronger for critical cues"
         }
     }
 

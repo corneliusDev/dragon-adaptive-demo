@@ -2,7 +2,10 @@
 //  A race plan as the runner set it up on the phone: what DragonEngine's
 //  RunPlan needs (distance, target, pacing, course, heart rate zones, fuel)
 //  plus what only the app cares about (name, unit, display setting, the
-//  course file's name). Codable, kept by PlanStore and reused across runs.
+//  course file's name, and how cues come onto the glasses: the segue and
+//  heads-ups). Codable, kept by PlanStore and reused across runs. Plans
+//  saved before the segue fields existed load with the defaults (Fade, Dot
+//  pulse).
 
 import Foundation
 import DragonEngine
@@ -63,6 +66,10 @@ struct SavedPlan: Codable, Equatable, Identifiable {
     var display: DisplaySetting
     /// App clock, for sorting the list; never handed to the engine.
     var updatedAt = Date()
+    /// How cues ease on and off the glasses on this race.
+    var segue = Segue.default
+    /// What warns of a predictable cue (empty: off).
+    var headsUp = HeadsUpKind.defaultSetting
 
     /// The engine's plan.
     var runPlan: RunPlan {
@@ -77,6 +84,34 @@ struct SavedPlan: Codable, Equatable, Identifiable {
     var summary: String {
         "\(RaceFormat.distance(distanceMeters, unit: unit)) · \(RaceFormat.clock(targetTime)) · "
             + "\(RaceFormat.paceValue(perUnit: averagePace)) \(RaceFormat.suffix(unit))"
+    }
+}
+
+extension SavedPlan {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, preset, distanceMeters, unit, targetTime, pacing, course, courseFileName, zones, fuelEvery,
+             display, updatedAt, segue, headsUp
+    }
+
+    /// Decodes every field; the segue and heads-ups default when the plan
+    /// was saved before they existed.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        preset = try c.decode(RaceDistance.self, forKey: .preset)
+        distanceMeters = try c.decode(Double.self, forKey: .distanceMeters)
+        unit = try c.decode(DistanceUnit.self, forKey: .unit)
+        targetTime = try c.decode(TimeInterval.self, forKey: .targetTime)
+        pacing = try c.decode(PacingStrategy.self, forKey: .pacing)
+        course = try c.decodeIfPresent(Course.self, forKey: .course)
+        courseFileName = try c.decodeIfPresent(String.self, forKey: .courseFileName)
+        zones = try c.decodeIfPresent(ZoneInputs.self, forKey: .zones)
+        fuelEvery = try c.decodeIfPresent(TimeInterval.self, forKey: .fuelEvery)
+        display = try c.decode(DisplaySetting.self, forKey: .display)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        segue = try c.decodeIfPresent(Segue.self, forKey: .segue) ?? .default
+        headsUp = try c.decodeIfPresent(Set<HeadsUpKind>.self, forKey: .headsUp) ?? HeadsUpKind.defaultSetting
     }
 }
 

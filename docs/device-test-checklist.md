@@ -163,3 +163,94 @@ rate need these device checks.
   note says where max came from. With access denied, the note says Health
   had nothing and how to fix it; the fields are left as they were.
 - Report: the numbers filled, compared with Health's own resting HR.
+
+## Chunk 14: segues and heads-ups
+
+The controls for all of these are on the SEGUES sheet (the button next to SCREEN GALLERY,
+debug builds): the Segue picker, the Heads-up toggles, a PREVIEW button for
+each (loops the mile split until STOP, on the mirror and on the connected
+glasses), and the tuning sliders. The settings are saved.
+
+### 1. How many fade steps Bluetooth handles without lag
+
+- **Do:** Connect the glasses. In SEGUES pick FADE, tap PREVIEW and watch the
+  split come and go for about 30 s. Then raise FADE IN STEPS and FADE OUT
+  STEPS one at a time (4, 5, 6, 8) and keep watching. Repeat with SLIDE and
+  GLOW. Try once with REDRAW ONLY WHAT CHANGED off.
+- **Expect:** each fade looks like a smooth ramp of brightness, it finishes
+  in roughly the FADE IN / FADE OUT time shown, and the split is never seen
+  half drawn (every frame is drawn inside hold/flush). It must not lag behind
+  the phone's mirror by more than about a quarter of a second.
+- **Report:** the largest step count that still keeps up for each segue, and
+  any flicker, tearing or lag, with the step count where it began.
+
+### 2. Whether the dimmest brightness levels are visible in daylight
+
+- **Do:** Outdoors in daylight, run the FADE preview at the default 4 steps
+  and look at the first fade-in frame (a quarter of full brightness: colour
+  levels 2 to 4) and the last fade-out frame. Repeat with GLOW (luma 3).
+- **Expect:** the dimmest step is at least faintly visible; if it is not, the
+  fade looks like a late snap and the first step count or the minimum level
+  needs raising.
+- **Report:** which steps were visible, for FADE and for GLOW, and the
+  light conditions (sun, overcast, shade).
+
+### 3. Whether the LED is noticeable while running
+
+- **Do:** Turn LED BLINK on (the only heads-up, then together with DOT
+  PULSE). During a run (or jogging on the spot), have someone tap the LED
+  BLINK PREVIEW, or play a synthetic race (RACE source) so real heads-ups
+  happen, 1.5 s before each split, fuel, hill, pace gap and kick clock.
+- **Expect:** the green LED's blink is noticed in the corner of the eye
+  without looking for it, and it stops when the cue appears.
+- **Report:** noticed or not, how many of the heads-ups were seen, and
+  whether it was distracting.
+
+### 4. Heads-up timing and partial redraws on the glasses
+
+- **Do:** Play the design walkthrough race at 1x with DOT PULSE on and the
+  glasses connected. Watch the kick clock count down in the last 400 m.
+- **Expect:** the status dot brightens about 1.5 s before each split, fuel
+  reminder, hill notice, pace-gap cue and the kick clock, never before the
+  heart-rate warning; the countdown's digits change without leaving ghost
+  pixels of the old digits (only the number is redrawn).
+- **Report:** any heads-up clearly early or late, any ghosting after a
+  partial redraw (if so, retry with REDRAW ONLY WHAT CHANGED off and say
+  whether it goes away).
+
+## Chunk 14 part B: segue and heads-ups in the race plan, Watch tap
+
+Not passed yet: these need a real Apple Watch, real glasses and an outdoor run.
+
+### 1. Watch tap strength on the wrist
+
+- **Do:** Pair a real Apple Watch with the Dragon app installed. In a race
+  plan, turn WATCH TAP on (the row is enabled once the Watch is paired or
+  reachable) and tap its PREVIEW. Then start a run of the plan (synthetic
+  or phone sensors) with the Watch workout running.
+- **Expect:** PREVIEW gives a light click on the wrist each loop. During the
+  run, a light click about 1.5 s before each split, fuel reminder, hill
+  notice and pace-gap cue, and a strong (notification) buzz before the
+  kick clock (a safety cue). No tap arrives after its cue is already on the
+  glasses (taps more than 2 s late are dropped on the Watch).
+- **Report:** whether light and strong are told apart while running, any
+  tap felt late or missing, and whether taps keep coming with the Watch
+  screen off and the phone locked (mirrored workout route).
+
+### 2. The plan's segue on a real run
+
+- **Do:** Save one plan with SLIDE and LED BLINK, another with INSTANT and
+  no heads-up. Run each (glasses connected) for at least two splits.
+- **Expect:** the first plan's cues rise into place and the LED blinks
+  before each split; the second's cues cut in with nothing before them.
+  The developer SEGUES sheet's choice does not change either run.
+- **Report:** what was seen for each plan, and any frame that flickered or
+  redrew the whole display mid-segue.
+
+### 3. Watch tap row with no Watch
+
+- **Do:** On a phone with no paired Watch (or the Dragon Watch app
+  removed), open a plan.
+- **Expect:** WATCH TAP and its PREVIEW are greyed out with the note "No
+  Apple Watch reachable…"; a plan saved earlier with the tap on keeps it.
+- **Report:** what the row shows.

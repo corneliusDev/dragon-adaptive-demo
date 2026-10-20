@@ -29,6 +29,12 @@ final class WatchConnectivityTransport: NSObject, WatchTransport, WCSessionDeleg
         return session.isReachable
     }
 
+    /// A Watch is paired and has the Dragon app (it can be opened for a run).
+    var isPairedWithApp: Bool {
+        guard let session, session.activationState == .activated else { return false }
+        return session.isPaired && session.isWatchAppInstalled
+    }
+
     @discardableResult
     func send(_ data: Data) -> Bool {
         guard let session, session.activationState == .activated else { return false }
@@ -50,6 +56,10 @@ final class WatchConnectivityTransport: NSObject, WatchTransport, WCSessionDeleg
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
+        DispatchQueue.main.async { self.onChange?() }
+    }
+
+    func sessionWatchStateDidChange(_ session: WCSession) {
         DispatchQueue.main.async { self.onChange?() }
     }
 
