@@ -25,7 +25,10 @@
 //  Segues (chunk 14): the race sends RunEngine's presented frame (cues eased
 //  on and off, heads-ups drawn) rather than its target; the Segue / HeadsUp
 //  settings come from SegueSettingsStore and follow it when it changes; a
-//  heads-up with .watchTap on goes to `haptics` (a no-op until chunk 12).
+//  heads-up with .watchTap on goes to `haptics` (the Watch, through the
+//  Watch link). A main-flow run (LiveRunModel) sends its own presented
+//  frames through showRunFrame, one per change, drawn on the glasses with
+//  only what changed redrawn.
 
 import Foundation
 import Combine
@@ -91,7 +94,7 @@ final class HUDController: ObservableObject {
 
     /// Segue, heads-up and tuning, persisted; the race engine follows it.
     let segueSettings: SegueSettingsStore
-    /// Where the Watch-tap heads-up goes (no-op until chunk 12).
+    /// Where the Watch-tap heads-up goes (the app sets WatchHeadsUpHaptics).
     var haptics: HeadsUpHaptics = NoHeadsUpHaptics()
     private var segueSubscription: AnyCancellable?
 
@@ -400,11 +403,20 @@ final class HUDController: ObservableObject {
     // MARK: - Main-flow run
 
     /// Shows a live run's frame on the mirror and the glasses; nil hands the
-    /// display back to this controller's own pipelines.
+    /// display back to this controller's own pipelines. The run's first frame
+    /// (and the hand-back) redraws the glasses whole; after that each frame
+    /// redraws only what changed, so segue steps and heads-ups stay smooth.
     func showRunFrame(_ frame: HUDFrame?) {
+        if (frame == nil) != (runFrame == nil) { backend?.invalidate() }
         runFrame = frame
-        backend?.invalidate()
         pushImmediateFrame()
+    }
+
+    /// Draws on these glasses as if they had just connected (tests: a
+    /// GlassesBackend over a recorder).
+    func attach(_ backend: GlassesBackend) {
+        backend.partialRedraw = segueSettings.settings.partialRedraw
+        self.backend = backend
     }
 
     /// Back to the measured effort for the budget.

@@ -8,14 +8,21 @@ import SwiftUI
 import DragonEngine
 
 extension HUDController {
-    /// The app's one controller: the glasses session and the 20 Hz HUD loop.
-    static let shared = HUDController()
+    /// The app's one controller: the glasses session and the 20 Hz HUD loop;
+    /// Watch-tap heads-ups go through the Watch link.
+    static let shared: HUDController = {
+        let hud = HUDController()
+        hud.haptics = WatchHeadsUpHaptics(link: WatchLink.shared)
+        return hud
+    }()
 }
 
 /// The models of the screens on the navigation stack.
 @Observable
 final class Flow {
     var editor: PlanEditorModel?
+    /// The plan editor's PREVIEW player (its mirror and the glasses).
+    var preview: SeguePreviewController?
     var live: LiveRunModel?
     var review: ReviewModel?
 }
@@ -66,6 +73,12 @@ struct RootView: View {
                           },
                           heartSource: environment.heartSource)
         }
+        .onAppear {
+            #if DEBUG
+            // -planEditorSegues (screenshots): open a new plan at its segue section.
+            if ProcessInfo.processInfo.arguments.contains("-planEditorSegues"), path.isEmpty { openEditor(nil) }
+            #endif
+        }
         .alert(alert ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
             Button("OK", role: .cancel) {}
         }
@@ -75,8 +88,8 @@ struct RootView: View {
     private func destination(_ route: Route) -> some View {
         switch route {
         case .newPlan, .editPlan:
-            if let editor = flow.editor {
-                PlanEditorView(model: editor,
+            if let editor = flow.editor, let preview = flow.preview {
+                PlanEditorView(model: editor, preview: preview,
                                onBack: { path.removeLast() },
                                onSave: { _ in home.reload(); path.removeLast() },
                                onStart: { plan in home.reload(); path.removeLast(); start(plan) },
@@ -97,7 +110,11 @@ struct RootView: View {
     }
 
     private func openEditor(_ plan: SavedPlan?) {
-        flow.editor = PlanEditorModel(plan: plan)
+        let preview = SeguePreviewController(hud: hud, haptics: hud.haptics)
+        let defaults = hud.segueSettings.settings
+        flow.preview = preview
+        flow.editor = PlanEditorModel(plan: plan, segueDefaults: (defaults.segue, defaults.headsUp),
+                                      segueConfig: defaults.config, watch: WatchLink.shared, previewer: preview)
         path.append(plan.map { .editPlan($0.id) } ?? .newPlan)
     }
 
@@ -115,7 +132,11 @@ struct RootView: View {
         path.removeLast()
     }
 
-    private var setup: LiveRunSetup { LiveRunSetup(environment: environment) }
+    private var setup: LiveRunSetup {
+        var s = LiveRunSetup(environment: environment)
+        s.segueConfig = hud.segueSettings.config
+        return s
+    }
 
     private func start(_ plan: SavedPlan) {
         show(setup.model(for: plan))
@@ -125,6 +146,7 @@ struct RootView: View {
     /// The live run's frames go to the glasses, the glasses' gestures to the run.
     private func show(_ model: LiveRunModel) {
         model.onFrame = { [weak hud] frame in hud?.showRunFrame(frame) }
+        model.haptics = hud.haptics
         hud.onAttention = { [weak model] event in model?.receive(event) }
         flow.live = model
     }

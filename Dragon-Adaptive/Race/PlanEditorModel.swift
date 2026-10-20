@@ -6,6 +6,14 @@
 //  Text fields stay text until saved; `problems` says, in words, what stops
 //  the plan from saving (an unparseable time, a pace no runner holds, zones
 //  out of order, a course file shorter than the race).
+//
+//  Segues (chunk 14 part B): the plan carries how cues come onto the glasses
+//  (Instant / Fade / Slide / Glow) and which heads-ups warn of a predictable
+//  one (Dot pulse / Edge tick / LED blink / Watch tap). A new plan starts
+//  from the app-wide SegueSettingsStore; PREVIEW plays a sample cue in the
+//  chosen style through a SeguePreviewPlaying (SeguePreviewController: the
+//  in-editor mirror and the glasses), looping until STOP. The Watch tap can
+//  only be turned on while a Watch is there to tap (WatchAvailability).
 
 import Foundation
 import Observation
@@ -43,6 +51,23 @@ enum PacingStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// Plays the segue PREVIEW (SeguePreviewController; a recorder in tests).
+protocol SeguePreviewPlaying: AnyObject {
+    var isPlaying: Bool { get }
+    func play(segue: Segue, headsUp: Set<HeadsUpKind>, config: SegueConfig)
+    func stop()
+}
+
+/// Whether a Watch is there for the Watch tap (WatchLink; a stub in tests).
+protocol WatchAvailability: AnyObject {
+    var canTap: Bool { get }
+}
+
+/// No Watch at all (previews, tests that don't care).
+final class NoWatch: WatchAvailability {
+    var canTap: Bool { false }
+}
+
 @Observable
 final class PlanEditorModel {
     let limits: PlanLimits
@@ -65,6 +90,18 @@ final class PlanEditorModel {
     /// Minutes between gels; empty for none.
     var fuelMinutes: String
     var display: DisplaySetting
+    /// How cues ease on and off the glasses.
+    var segue: Segue
+    /// The heads-ups chosen (empty: off). A Watch tap chosen earlier stays
+    /// chosen while the Watch is away (the run just has nothing to tap).
+    private(set) var headsUp: Set<HeadsUpKind>
+    /// Segue timings for PREVIEW (the app-wide tuning; not part of the plan).
+    let segueConfig: SegueConfig
+    /// Plays PREVIEW; nil shows nothing (set by the screen).
+    @ObservationIgnored var previewer: SeguePreviewPlaying?
+    /// What PREVIEW is playing ("SLIDE · DOT PULSE"); nil when stopped.
+    private(set) var previewing: String?
+    @ObservationIgnored let watch: WatchAvailability
 
     private(set) var course: Course?
     private(set) var courseFileName: String?
@@ -82,9 +119,19 @@ final class PlanEditorModel {
     /// Waiting for Health.
     private(set) var readingHealth = false
 
-    init(plan: SavedPlan? = nil, limits: PlanLimits = PlanLimits()) {
+    /// `segueDefaults`: the segue and heads-ups a new plan starts with (the
+    /// app's SegueSettingsStore); a saved plan keeps its own.
+    init(plan: SavedPlan? = nil, limits: PlanLimits = PlanLimits(),
+         segueDefaults: (segue: Segue, headsUp: Set<HeadsUpKind>) = (.default, HeadsUpKind.defaultSetting),
+         segueConfig: SegueConfig = SegueConfig(), watch: WatchAvailability = NoWatch(),
+         previewer: SeguePreviewPlaying? = nil) {
         self.limits = limits
         original = plan
+        segue = plan?.segue ?? segueDefaults.segue
+        headsUp = plan?.headsUp ?? segueDefaults.headsUp
+        self.segueConfig = segueConfig
+        self.watch = watch
+        self.previewer = previewer
         let p = plan
         name = p?.name ?? ""
         preset = p?.preset ?? .half
@@ -110,6 +157,77 @@ final class PlanEditorModel {
         }
         if let course = p?.course {
             setCourse(course, fileName: p?.courseFileName ?? "course.gpx")
+        }
+    }
+
+    // MARK: Segue and heads-ups
+
+    /// A Watch is paired and reachable enough to tap the wrist.
+    var watchTapAvailable: Bool { watch.canTap }
+
+    /// "Pair an Apple Watch…" while the Watch tap can't be used; nil when it can.
+    var watchTapNote: String? {
+        watchTapAvailable ? nil : "No Apple Watch reachable: open Dragon on the Watch to use the tap."
+    }
+
+    func isOn(_ kind: HeadsUpKind) -> Bool { headsUp.contains(kind) }
+
+    /// Turns a heads-up on or off. The Watch tap can't be turned on with no
+    /// Watch (it can be turned off).
+    func setHeadsUp(_ kind: HeadsUpKind, on: Bool) {
+        if on {
+            guard kind != .watchTap || watchTapAvailable else { return }
+            headsUp.insert(kind)
+        } else {
+            headsUp.remove(kind)
+        }
+    }
+
+    /// The heads-ups PREVIEW plays: the Watch tap only while a Watch is there.
+    private var playableHeadsUp: Set<HeadsUpKind> {
+        watchTapAvailable ? headsUp : headsUp.subtracting([.watchTap])
+    }
+
+    var isPreviewing: Bool { previewing != nil }
+
+    /// PREVIEW of the segue: the sample cue in the chosen segue with the chosen heads-ups.
+    func previewSegue() {
+        play(segue: segue, headsUp: playableHeadsUp)
+    }
+
+    /// PREVIEW of one heads-up: that heads-up before the sample cue, in the chosen segue.
+    func previewHeadsUp(_ kind: HeadsUpKind) {
+        guard kind != .watchTap || watchTapAvailable else { return }
+        play(segue: segue, headsUp: [kind])
+    }
+
+    func stopPreview() {
+        previewer?.stop()
+        previewing = nil
+    }
+
+    private func play(segue: Segue, headsUp: Set<HeadsUpKind>) {
+        guard let previewer else { return }
+        previewer.play(segue: segue, headsUp: headsUp, config: segueConfig)
+        previewing = ([Self.title(segue)] + HeadsUpKind.allCases.filter(headsUp.contains).map(Self.title))
+            .joined(separator: " · ")
+    }
+
+    static func title(_ segue: Segue) -> String {
+        switch segue {
+        case .instant: return "INSTANT"
+        case .fade: return "FADE"
+        case .slide: return "SLIDE"
+        case .glow: return "GLOW"
+        }
+    }
+
+    static func title(_ kind: HeadsUpKind) -> String {
+        switch kind {
+        case .dotPulse: return "DOT PULSE"
+        case .edgeTick: return "EDGE TICK"
+        case .ledBlink: return "LED BLINK"
+        case .watchTap: return "WATCH TAP"
         }
     }
 
@@ -363,7 +481,7 @@ final class PlanEditorModel {
                          course: course, courseFileName: courseFileName,
                          zones: zonesEntered ? zones : nil,
                          fuelEvery: fuelMinutes.trimmingCharacters(in: .whitespaces).isEmpty ? nil : fuelEvery,
-                         display: display)
+                         display: display, segue: segue, headsUp: headsUp)
     }
 
     /// Saves to the store; returns the saved plan, or nil while there are problems.

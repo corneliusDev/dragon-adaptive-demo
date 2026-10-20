@@ -217,3 +217,40 @@ glasses), and the tuning sliders. The settings are saved.
 - **Report:** any heads-up clearly early or late, any ghosting after a
   partial redraw (if so, retry with REDRAW ONLY WHAT CHANGED off and say
   whether it goes away).
+
+## Chunk 14 part B: segue and heads-ups in the race plan, Watch tap
+
+Not passed yet: these need a real Apple Watch, real glasses and an outdoor run.
+
+### 1. Watch tap strength on the wrist
+
+- **Do:** Pair a real Apple Watch with the Dragon app installed. In a race
+  plan, turn WATCH TAP on (the row is enabled once the Watch is paired or
+  reachable) and tap its PREVIEW. Then start a run of the plan (synthetic
+  or phone sensors) with the Watch workout running.
+- **Expect:** PREVIEW gives a light click on the wrist each loop. During the
+  run, a light click about 1.5 s before each split, fuel reminder, hill
+  notice and pace-gap cue, and a strong (notification) buzz before the
+  kick clock (a safety cue). No tap arrives after its cue is already on the
+  glasses (taps more than 2 s late are dropped on the Watch).
+- **Report:** whether light and strong are told apart while running, any
+  tap felt late or missing, and whether taps keep coming with the Watch
+  screen off and the phone locked (mirrored workout route).
+
+### 2. The plan's segue on a real run
+
+- **Do:** Save one plan with SLIDE and LED BLINK, another with INSTANT and
+  no heads-up. Run each (glasses connected) for at least two splits.
+- **Expect:** the first plan's cues rise into place and the LED blinks
+  before each split; the second's cues cut in with nothing before them.
+  The developer SEGUES sheet's choice does not change either run.
+- **Report:** what was seen for each plan, and any frame that flickered or
+  redrew the whole display mid-segue.
+
+### 3. Watch tap row with no Watch
+
+- **Do:** On a phone with no paired Watch (or the Dragon Watch app
+  removed), open a plan.
+- **Expect:** WATCH TAP and its PREVIEW are greyed out with the note "No
+  Apple Watch reachable…"; a plan saved earlier with the tap on keeps it.
+- **Report:** what the row shows.

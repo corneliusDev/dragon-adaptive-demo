@@ -1,5 +1,5 @@
 //  SeguePreview.swift
-//  The SEGUES section's PREVIEW: a sample cue (the mile split) appearing and
+//  PREVIEW (the plan editor's segue section and the developer SEGUES sheet): a sample cue (the mile split) appearing and
 //  leaving with the chosen segue and heads-up, looping until STOP, on the
 //  phone mirror and (through HUDController) on the glasses when connected.
 //
@@ -68,7 +68,8 @@ struct SeguePreview {
 }
 
 /// Plays a SeguePreview at 20 Hz on the mirror and the glasses until stopped.
-final class SeguePreviewController: ObservableObject {
+/// The SEGUES debug sheet and the plan editor's PREVIEW both use it.
+final class SeguePreviewController: ObservableObject, SeguePreviewPlaying {
     @Published private(set) var isPlaying = false
     /// The frame on the mirror while playing.
     @Published private(set) var frame = HUDFrame()

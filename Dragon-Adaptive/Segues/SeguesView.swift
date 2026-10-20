@@ -4,7 +4,8 @@
 //  leaving in that style, looping on the mirror here and on the glasses when
 //  connected, until STOP), and the SegueConfig sliders for tuning on real
 //  glasses. Everything is saved (SegueSettingsStore) and the race engine
-//  follows it. Part B moves the Segue / Heads-up pickers into the plan editor.
+//  follows it. Race plans pick their own Segue / Heads-up in the plan editor
+//  (these are the defaults for a new plan); the tuning here applies to all.
 
 import SwiftUI
 import DragonEngine

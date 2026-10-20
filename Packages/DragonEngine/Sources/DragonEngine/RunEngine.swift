@@ -107,18 +107,21 @@ public struct RunEngine {
         public var headsUpBegan: Bool
     }
 
-    /// A heads-up: which cue is coming and when it should appear.
+    /// A heads-up: which cue is coming, how much it matters and when it should appear.
     public struct HeadsUpSignal: Sendable, Equatable {
         public var key: CueKey
         /// Run time it began.
         public var since: TimeInterval
         /// Run time the cue is due on screen.
         public var dueAt: TimeInterval
+        /// The coming cue's priority (the Watch tap is strong for critical and safety).
+        public var priority: Priority
 
-        public init(key: CueKey, since: TimeInterval, dueAt: TimeInterval) {
+        public init(key: CueKey, since: TimeInterval, dueAt: TimeInterval, priority: Priority = .advisory) {
             self.key = key
             self.since = since
             self.dueAt = dueAt
+            self.priority = priority
         }
     }
 
@@ -292,10 +295,15 @@ public struct RunEngine {
 
         // The heads-up running, and the frame to show now.
         let before = headsUpSignal
-        headsUpSignal = arbiter.headsUp(at: t).map {
-            HeadsUpSignal(key: $0.key, since: $0.since, dueAt: $0.since + presentation.config.headsUpLead)
+        headsUpSignal = arbiter.headsUp(at: t).map { h in
+            // The cue's priority: waiting in the arbiter, or as its trigger forecast it.
+            let priority = arbiter.waiting.first { $0.key == h.key }?.priority
+                ?? upcoming.first { $0.key == h.key }?.priority ?? before.flatMap { $0.key == h.key ? $0.priority : nil }
+                ?? .advisory
+            return HeadsUpSignal(key: h.key, since: h.since, dueAt: h.since + presentation.config.headsUpLead,
+                                 priority: priority)
         }
-        let began = headsUpSignal != nil && headsUpSignal != before
+        let began = headsUpSignal.map { now in before.map { $0.key != now.key || $0.since != now.since } ?? true } ?? false
         presentedFrame = presentation.frame(target: drawn, cue: shown, headsUpSince: headsUpSignal?.since, at: t)
         let presentedChanged = presentedFrame.signature != presentedSignature
         if presentedChanged { presentedSignature = presentedFrame.signature }

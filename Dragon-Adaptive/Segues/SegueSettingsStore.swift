@@ -2,9 +2,10 @@
 //  The runner's Segue and HeadsUp choices and the SegueConfig tuning,
 //  persisted in UserDefaults (one JSON value) so they survive launches.
 //  HUDController hands them to the RunEngine and keeps it in step when they
-//  change. For now the developer screen's SEGUES section edits them; part B
-//  moves the Segue and Heads-up pickers into the race plan editor, reading
-//  and writing this same store.
+//  change. The developer screen's SEGUES section edits them. Each race plan
+//  carries its own Segue and Heads-up choice (picked in the plan editor);
+//  this store's are what a new plan starts with and what the developer
+//  RACE path uses. The SegueConfig tuning stays here, app-wide.
 
 import Foundation
 import Combine

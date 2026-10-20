@@ -15,6 +15,8 @@ struct LiveRunSetup {
     let heart: HeartSourcePreference
     /// The phone's sensors for a new real run, with the heart source picked (fakes in tests).
     var sensors: (HeartSource) -> PhoneSensorRun
+    /// The app-wide segue tuning (the plan picks the segue and heads-ups).
+    var segueConfig = SegueConfig()
 
     init(environment: AppEnvironment,
          heartSensors: @escaping (HeartSource) -> PhoneSensorRun = { PhoneSensorRun.system(heart: $0) }) {
@@ -36,8 +38,9 @@ struct LiveRunSetup {
 
     func model(for plan: SavedPlan, source: RunDataSource) -> LiveRunModel {
         switch source {
-        case .synthetic: return LiveRunModel(plan: plan, timeScale: timeScale)
-        case .phone: return LiveRunModel(plan: plan, feed: .phone(sensors(heart.source)), timeScale: timeScale)
+        case .synthetic: return LiveRunModel(plan: plan, timeScale: timeScale, segueConfig: segueConfig)
+        case .phone: return LiveRunModel(plan: plan, feed: .phone(sensors(heart.source)), timeScale: timeScale,
+                                         segueConfig: segueConfig)
         }
     }
 
@@ -67,6 +70,7 @@ struct LiveRunSetup {
     func replay(_ record: RunRecord, store: RunStore) throws -> LiveRunModel? {
         guard let recording = try store.recording(for: record) else { return nil }
         let label = "\(record.plan.name), \(record.startedAt.formatted(date: .abbreviated, time: .shortened))"
-        return LiveRunModel(plan: record.plan, feed: .replay(recording, label: label), timeScale: timeScale)
+        return LiveRunModel(plan: record.plan, feed: .replay(recording, label: label), timeScale: timeScale,
+                            segueConfig: segueConfig)
     }
 }
