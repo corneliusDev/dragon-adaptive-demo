@@ -86,6 +86,17 @@ public enum CueKind: String, Sendable, Codable, CaseIterable {
     case split, paceGap, status, detail, target, heartCeiling, terrain, fuel, formFade, kickClock, finish
     /// A Scenario card from the cycling / SOF demos.
     case scripted
+
+    /// Whether its trigger can see it coming (a marker, the fuel schedule, a
+    /// hill ahead, the last 400 m, a pace gap holding): these announce
+    /// themselves ahead of time (Upcoming) and get a heads-up. Heart rate and
+    /// form fade can't be foreseen, and answers are asked for: no heads-up.
+    public var isPredictable: Bool {
+        switch self {
+        case .split, .paceGap, .fuel, .terrain, .kickClock: return true
+        case .status, .detail, .target, .heartCeiling, .formFade, .finish, .scripted: return false
+        }
+    }
 }
 
 /// A reading a cue depends on. When the budget says it is unreliable the cue
@@ -188,10 +199,14 @@ public struct Cue: Sendable, Equatable {
     public var deferUntil: Deferral?
     /// Readings this cue is only as good as; held back while any is unreliable.
     public var needs: Set<CueInput>
+    /// The answer to a glance or held look: it appears at once (no quiet gap,
+    /// no easing in), whatever the segue.
+    public var requested: Bool
 
     public init(key: CueKey, priority: Priority, reveal: Reveal = .auto, content: CueContent,
                 createdAt: TimeInterval, expiresAt: TimeInterval, minShow: TimeInterval,
-                planGap: TimeInterval? = nil, deferUntil: Deferral? = nil, needs: Set<CueInput> = []) {
+                planGap: TimeInterval? = nil, deferUntil: Deferral? = nil, needs: Set<CueInput> = [],
+                requested: Bool = false) {
         self.key = key
         self.priority = priority
         self.reveal = reveal
@@ -202,5 +217,6 @@ public struct Cue: Sendable, Equatable {
         self.planGap = planGap
         self.deferUntil = deferUntil
         self.needs = needs
+        self.requested = requested
     }
 }

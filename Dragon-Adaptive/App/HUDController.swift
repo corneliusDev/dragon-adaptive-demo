@@ -21,6 +21,11 @@
 //  race time keeps running (at the race speed) so the result shows on the
 //  glasses for its 10 s and the display goes dark; then the log is saved to
 //  Documents/CueLogs as JSON lines and the review list opens.
+//
+//  Segues (chunk 14): the race sends RunEngine's presented frame (cues eased
+//  on and off, heads-ups drawn) rather than its target; the Segue / HeadsUp
+//  settings come from SegueSettingsStore and follow it when it changes; a
+//  heads-up with .watchTap on goes to `haptics` (a no-op until chunk 12).
 
 import Foundation
 import Combine
@@ -84,6 +89,12 @@ final class HUDController: ObservableObject {
         didSet { runEngine.effortOverride = effortOverride }
     }
 
+    /// Segue, heads-up and tuning, persisted; the race engine follows it.
+    let segueSettings: SegueSettingsStore
+    /// Where the Watch-tap heads-up goes (no-op until chunk 12).
+    var haptics: HeadsUpHaptics = NoHeadsUpHaptics()
+    private var segueSubscription: AnyCancellable?
+
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
     private let session = GlassesSession()
     private let sim = SimulatedAttentionSource()
@@ -94,7 +105,8 @@ final class HUDController: ObservableObject {
     // RunEngine (estimator → triggers → arbiter), updated at race run time.
     private lazy var runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting,
                                                              effort: effortOverride,
-                                                             name: "\(race.profile.name) seed \(race.seed)")
+                                                             name: "\(race.profile.name) seed \(race.seed)",
+                                                             segues: segueSettings.settings)
     private var raceStarted = false
     private var raceLogSaved = false
     /// Told the engine the runner crossed the line.
@@ -125,8 +137,12 @@ final class HUDController: ObservableObject {
     // Change to true only when you want to freeze the glasses on the calibration pattern.
     private let showCalibrationOnConnect = false
 
-    init() {
+    init(segueSettings: SegueSettingsStore = SegueSettingsStore()) {
         print("[HUDController] init")
+        self.segueSettings = segueSettings
+        segueSubscription = segueSettings.$settings.dropFirst().sink { [weak self] settings in
+            self?.applySegueSettings(settings)
+        }
 
         sim.onEvent = { [weak self] event in
             print("[HUDController] simulated attention event: \(event)")
@@ -178,6 +194,7 @@ final class HUDController: ObservableObject {
             print("[HUDController] onConnected: \(glasses.name)")
 
             let backend = GlassesBackend(glasses: glasses)
+            backend.partialRedraw = self.segueSettings.settings.partialRedraw
             self.backend = backend
 
             let gesture = GestureAttentionSource(glasses: glasses)
@@ -324,7 +341,8 @@ final class HUDController: ObservableObject {
         race.reset(profile: raceProfile)
         racePlaying = false
         runEngine = HUDController.makeRunEngine(plan: race.run.plan, display: displaySetting, effort: effortOverride,
-                                                name: "\(raceProfile.name) seed \(race.seed)")
+                                                name: "\(raceProfile.name) seed \(race.seed)",
+                                                segues: segueSettings.settings)
         raceStarted = false
         raceLogSaved = false
         raceFinishSent = false
@@ -354,6 +372,22 @@ final class HUDController: ObservableObject {
         pushImmediateFrame()
     }
 
+    /// Holds `frame` in place of the live HUD like showOnGlasses, but as one
+    /// frame of an animation (the segue preview): the glasses get only what
+    /// changed, not a forced full redraw.
+    func present(_ frame: HUDFrame) {
+        galleryFrame = frame
+        pushImmediateFrame()
+    }
+
+    /// The race engine follows the segue settings as they change.
+    private func applySegueSettings(_ settings: SegueSettingsStore.Settings) {
+        runEngine.segue = settings.segue
+        runEngine.headsUp = settings.headsUp
+        runEngine.segueConfig = settings.config
+        backend?.partialRedraw = settings.partialRedraw
+    }
+
     func resumeLiveHUD() {
         guard galleryFrame != nil else { return }
         galleryFrame = nil
@@ -379,10 +413,14 @@ final class HUDController: ObservableObject {
     }
 
     /// A RunEngine with the controller's display setting and effort override applied.
-    static func makeRunEngine(plan: RunPlan, display: DisplaySetting, effort: Double?, name: String = "") -> RunEngine {
+    static func makeRunEngine(plan: RunPlan, display: DisplaySetting, effort: Double?, name: String = "",
+                              segues: SegueSettingsStore.Settings = .init()) -> RunEngine {
         var config = RunEngine.Config()
         config.display = display
         config.name = name
+        config.segue = segues.segue
+        config.headsUp = segues.headsUp
+        config.segues = segues.config
         var engine = RunEngine(plan: plan, config: config)
         engine.effortOverride = effort
         return engine
@@ -517,6 +555,9 @@ final class HUDController: ObservableObject {
                     runEngine.finish(at: race.run.finishTime ?? race.run.time)
                 }
                 let step = runEngine.update(at: raceTime)
+                if step.headsUpBegan, let signal = step.headsUp, runEngine.headsUp.contains(.watchTap) {
+                    haptics.headsUp(signal)
+                }
                 raceState = step.state
                 decisions = step.decisions
                 budget = (step.budget, step.situation)
@@ -531,7 +572,8 @@ final class HUDController: ObservableObject {
                     }
                 }
             }
-            nextFrame = runEngine.frame()
+            // Mid-change frames and the heads-up included; the target before the race starts.
+            nextFrame = raceStarted ? runEngine.presentedFrame : runEngine.frame()
         } else {
             nextFrame = legacyFrame
         }

@@ -78,9 +78,17 @@ public enum HUDAlign: Sendable, Equatable {
     case center
 }
 
+/// The glasses' green LED.
+public enum HUDLed: String, Sendable, Equatable, Codable {
+    case off, on, blink
+}
+
 public enum HUDOp: Sendable, Equatable {
     case clear
     case luma(UInt8)
+    /// The LED's state; like luma, a state op that draws nothing. A frame
+    /// without one leaves the LED off.
+    case led(HUDLed)
     case text(x: Int, y: Int, font: HUDFont, color: UInt8, align: HUDAlign, _ string: String)
     case line(x0: Int, y0: Int, x1: Int, y1: Int, color: UInt8)
     case rect(x0: Int, y0: Int, x1: Int, y1: Int, color: UInt8)
@@ -103,11 +111,11 @@ public enum Display {
 }
 
 extension HUDOp {
-    /// What the op covers on the display (inclusive), nil for state ops (clear, luma).
+    /// What the op covers on the display (inclusive), nil for state ops (clear, luma, led).
     /// Text is estimated from the font's advance and line height.
     public var bounds: (minX: Int, minY: Int, maxX: Int, maxY: Int)? {
         switch self {
-        case .clear, .luma:
+        case .clear, .luma, .led:
             return nil
         case .text(let x, let y, let font, _, let align, let s):
             let w = s.count * font.advance
@@ -145,6 +153,8 @@ public struct HUDFrame: Sendable, Equatable {
                 return "c"
             case .luma(let l):
                 return "l\(l)"
+            case .led(let state):
+                return "D\(state.rawValue)"
             case .text(let x, let y, let f, let col, _, let s):
                 return "t\(x),\(y),\(f.rawValue),\(col),\(s)"
             case .line(let a, let b, let c, let d, let e):
