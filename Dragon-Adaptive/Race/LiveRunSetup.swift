@@ -11,13 +11,22 @@ import DragonEngine
 struct LiveRunSetup {
     let timeScale: Double
     let preference: RunSourcePreference
-    /// The phone's sensors for a new real run (fakes in tests).
-    var sensors: () -> PhoneSensorRun = { PhoneSensorRun.system() }
+    /// Where a real run's heart rate comes from (the Watch, synthetic, none).
+    let heart: HeartSourcePreference
+    /// The phone's sensors for a new real run, with the heart source picked (fakes in tests).
+    var sensors: (HeartSource) -> PhoneSensorRun
 
-    init(environment: AppEnvironment, sensors: @escaping () -> PhoneSensorRun = { PhoneSensorRun.system() }) {
+    init(environment: AppEnvironment,
+         heartSensors: @escaping (HeartSource) -> PhoneSensorRun = { PhoneSensorRun.system(heart: $0) }) {
         timeScale = environment.timeScale
         preference = environment.runSource
-        self.sensors = sensors
+        heart = environment.heartSource
+        sensors = heartSensors
+    }
+
+    /// Sensors that don't depend on the heart source (tests).
+    init(environment: AppEnvironment, sensors: @escaping () -> PhoneSensorRun) {
+        self.init(environment: environment, heartSensors: { _ in sensors() })
     }
 
     /// A live run of `plan` from the remembered source (not started).
@@ -28,7 +37,7 @@ struct LiveRunSetup {
     func model(for plan: SavedPlan, source: RunDataSource) -> LiveRunModel {
         switch source {
         case .synthetic: return LiveRunModel(plan: plan, timeScale: timeScale)
-        case .phone: return LiveRunModel(plan: plan, feed: .phone(sensors()), timeScale: timeScale)
+        case .phone: return LiveRunModel(plan: plan, feed: .phone(sensors(heart.source)), timeScale: timeScale)
         }
     }
 
@@ -43,6 +52,15 @@ struct LiveRunSetup {
         let next = model(for: current.plan, source: source)
         if source == .synthetic { next.start(timer: timer) }
         return next
+    }
+
+    /// The runner picked another heart source before a real run's start:
+    /// remembered, and the not-yet-started run rebuilt with it.
+    func switchHeart(of current: LiveRunModel, to source: HeartSource) -> LiveRunModel {
+        heart.source = source
+        guard current.kind == .phone, !current.hasStarted else { return current }
+        current.sensors?.stop()
+        return model(for: current.plan, source: .phone)
     }
 
     /// A replay of a recorded run, on the run's own plan and settings.

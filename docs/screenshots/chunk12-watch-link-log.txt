@@ -1,0 +1,45 @@
+# Chunk 12: paired simulators, phone <-> Watch over WatchConnectivity
+# Phone: DRAGON iPhone launched with -watchDemo; Watch: DRAGON Watch launched with -syntheticHR
+## Phone ([WatchLink])
+Timestamp               Ty Process[PID:TID]
+2026-10-19 23:25:10.230 Df [WatchLink] demo: start sent yes
+2026-10-19 23:25:10.738 Df [WatchLink] received state starting · seq 0 via connectivity
+2026-10-19 23:25:11.203 Df [WatchLink] received state running · seq 1 via connectivity
+2026-10-19 23:25:11.213 Df [WatchLink] received hr 97 · seq 2 via connectivity
+2026-10-19 23:25:12.195 Df [WatchLink] received effort 33 · seq 3 via connectivity
+2026-10-19 23:25:12.204 Df [WatchLink] received hr 97 · seq 4 via connectivity
+2026-10-19 23:25:13.189 Df [WatchLink] received effort 51 · seq 5 via connectivity
+2026-10-19 23:25:13.199 Df [WatchLink] received hr 102 · seq 6 via connectivity
+2026-10-19 23:25:14.187 Df [WatchLink] received effort 69 · seq 7 via connectivity
+2026-10-19 23:25:14.196 Df [WatchLink] received hr 104 · seq 8 via connectivity
+2026-10-19 23:25:15.234 Df [WatchLink] received effort 66 · seq 9 via connectivity
+2026-10-19 23:25:16.189 Df [WatchLink] received effort 54 · seq 10 via connectivity
+2026-10-19 23:25:16.192 Df [WatchLink] received hr 110 · seq 11 via connectivity
+2026-10-19 23:25:17.191 Df [WatchLink] received effort 43 · seq 12 via connectivity
+2026-10-19 23:25:18.200 Df [WatchLink] received hr 111 · seq 13 via connectivity
+2026-10-19 23:25:18.207 Df [WatchLink] received effort 39 · seq 14 via connectivity
+2026-10-19 23:25:19.202 Df [WatchLink] received hr 112 · seq 15 via connectivity
+2026-10-19 23:25:19.210 Df [WatchLink] received effort 44 · seq 16 via connectivity
+2026-10-19 23:25:20.197 Df [WatchLink] received hr 114 · seq 17 via connectivity
+2026-10-19 23:25:20.205 Df [WatchLink] received effort 49 · seq 18 via connectivity
+2026-10-19 23:25:21.199 Df [WatchLink] received hr 114 · seq 19 via connectivity
+2026-10-19 23:25:21.206 Df [WatchLink] received effort 54 · seq 20 via connectivity
+2026-10-19 23:25:22.199 Df [WatchLink] received hr 117 · seq 21 via connectivity
+2026-10-19 23:25:22.206 Df [WatchLink] received effort 41 · seq 22 via connectivity
+2026-10-19 23:25:23.199 Df [WatchLink] received effort 28 · seq 23 via connectivity
+2026-10-19 23:25:23.201 Df [WatchLink] received hr 116 · seq 24 via connectivity
+2026-10-19 23:25:24.202 Df [WatchLink] received effort 33 · seq 25 via connectivity
+2026-10-19 23:25:24.208 Df [WatchLink] received hr 119 · seq 26 via connectivity
+2026-10-19 23:25:25.202 Df [WatchLink] received effort 19 · seq 27 via connectivity
+2026-10-19 23:25:25.210 Df [WatchLink] received hr 120 · seq 28 via connectivity
+2026-10-19 23:25:26.203 Df [WatchLink] received hr 119 · seq 29 via connectivity
+2026-10-19 23:25:26.206 Df [WatchLink] demo: End sent to the Watch
+2026-10-19 23:25:26.206 Df [WatchLink] received effort 11 · seq 30 via connectivity
+2026-10-19 23:25:27.203 Df [WatchLink] received hr 117 · seq 31 via connectivity
+2026-10-19 23:25:27.210 Df [WatchLink] received effort 25 · seq 32 via connectivity
+2026-10-19 23:25:28.225 Df [WatchLink] received effort 46 · seq 33 via connectivity
+2026-10-19 23:25:28.233 Df [WatchLink] received state ended · seq 34 via connectivity
+## Watch ([PhoneLink])
+Timestamp               Ty Process[PID:TID]
+2026-10-19 23:25:10.523 Df [PhoneLink] received command startWorkout · seq 0
+2026-10-19 23:25:27.488 Df [PhoneLink] received command endWorkout · seq 1

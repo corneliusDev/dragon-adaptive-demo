@@ -1,6 +1,7 @@
 //  VitalsSource.swift
 //  Motion + heart-rate input: the synthetic stream, the iPhone's motion
-//  sensors (motion, pedometer cadence, barometric altitude) and, next, the Watch.
+//  sensors (motion, pedometer cadence, barometric altitude) and the Watch
+//  (WatchMessage over the Watch link, filtered by WatchMessageFilter).
 //  Same idea as AttentionSource — the engine never knows where samples
 //  come from, so swapping in the real watch is a one-line change in HUDController.
 //  Each sample does say which device it came from, because the state estimator

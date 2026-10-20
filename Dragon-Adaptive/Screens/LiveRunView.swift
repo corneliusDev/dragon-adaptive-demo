@@ -8,7 +8,9 @@
 //  Above the mirror, the run's data source: Synthetic or Phone sensors
 //  (until a real run starts). With phone sensors, before the start, the
 //  sensor panel explains each permission before the system asks, and says
-//  plainly when location is off (with a way back to synthetic data).
+//  plainly when location is off (with a way back to synthetic data); under
+//  it, where heart rate comes from: the Watch, synthetic, or none. Ending
+//  the workout on the Watch ends the run here too.
 
 import SwiftUI
 import UIKit
@@ -21,6 +23,8 @@ struct LiveRunView: View {
     var onEnd: () -> Void = {}
     /// The runner picked another data source; nil hides the picker.
     var onSourceChange: ((RunDataSource) -> Void)?
+    /// The runner picked another heart source (phone runs, before the start); nil hides the picker.
+    var onHeartChange: ((HeartSource) -> Void)?
 
     /// The picker shows until a real run starts (a synthetic one can be swapped any time).
     private var showsSourcePicker: Bool {
@@ -38,7 +42,7 @@ struct LiveRunView: View {
                 TopBar {
                     HStack(spacing: 6) {
                         Circle().fill(glassesConnected ? Theme.phos : Color(white: 0.3)).frame(width: 7, height: 7)
-                        Text("\(glassesConnected ? "Glasses" : "No glasses") · \(model.sourceName)")
+                        Text("\(glassesConnected ? "Glasses" : "No glasses")\(model.heartSource == .watch ? " · Watch" : "") · \(model.sourceName)")
                             .font(Theme.mono(11)).foregroundColor(Theme.muted)
                     }
                 } trailing: {
@@ -66,6 +70,16 @@ struct LiveRunView: View {
                 if model.kind == .phone, !model.hasStarted, let permissions = model.permissions {
                     PhoneSensorsPanel(permissions: permissions,
                                       onUseSynthetic: onSourceChange.map { change in { change(.synthetic) } })
+                }
+
+                if model.kind == .phone, !model.hasStarted, let onHeartChange, let heart = model.heartSource {
+                    Field(label: "Heart rate from") {
+                        Segmented(options: HeartSource.allCases.map { ($0.title, $0) },
+                                  selection: Binding(get: { heart }, set: { if $0 != heart { onHeartChange($0) } }),
+                                  idPrefix: "heart")
+                        Text(HeartSource.explanation(heart)).font(.system(size: 12)).foregroundColor(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 HUDPanel(frame: model.frame)
@@ -144,10 +158,13 @@ struct LiveRunScreen: View {
     @ObservedObject var hud: HUDController
     var onEnd: () -> Void = {}
     var onSourceChange: ((RunDataSource) -> Void)?
+    var onHeartChange: ((HeartSource) -> Void)?
 
     var body: some View {
         LiveRunView(model: model, glassesConnected: hud.connection.isConnected, onEnd: onEnd,
-                    onSourceChange: onSourceChange)
+                    onSourceChange: onSourceChange, onHeartChange: onHeartChange)
+            // Ending the workout on the Watch ends the run.
+            .onChange(of: model.endedOnWatch) { _, ended in if ended { onEnd() } }
             .onAppear {
                 // START RUN on the plan screen is the gun for a synthetic race or a
                 // replay; a real run waits for START (and its permissions).
@@ -157,6 +174,17 @@ struct LiveRunScreen: View {
                     model.start()
                 }
             }
+    }
+}
+
+extension HeartSource {
+    /// One line under the picker on what this choice does.
+    static func explanation(_ source: HeartSource) -> String {
+        switch source {
+        case .watch: return "START opens Dragon on the Apple Watch and starts a running workout there; its heart rate and wrist motion come over every second or so. END on either ends both."
+        case .synthetic: return "A synthetic Watch: made-up heart rate and wrist motion, for trying heart-rate cues without a Watch."
+        case .none: return "No heart rate: heart-rate cues stay off; effort comes from the phone's motion."
+        }
     }
 }
 

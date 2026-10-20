@@ -4,8 +4,10 @@
 //  slider and source (SLIDER / WATCH / RACE), LOOK / WAVE, the synthetic race
 //  profile picker with 1x / 10x, the DISPLAY setting, the state overlay, the
 //  cue log, course debug and the screen gallery, and the recordings of real
-//  runs to replay through the live run screen. Same HUDController as the
-//  main flow, so the glasses connection is shared.
+//  runs to replay through the live run screen, and the Watch link (where a
+//  real run's heart rate comes from, the link's state, the latest messages
+//  from the Watch, and start / end of the Watch workout). Same HUDController
+//  as the main flow, so the glasses connection is shared.
 import SwiftUI
 import DragonEngine
 
@@ -15,6 +17,10 @@ struct DeveloperView: View {
     var recordings: [RunRecord] = []
     /// Replay one through the live run screen.
     var onReplay: (RunRecord) -> Void = { _ in }
+    /// Where a real run's heart rate comes from; nil hides the picker.
+    var heartSource: HeartSourcePreference?
+    var watch: WatchLink = .shared
+    @State private var heart: HeartSource = .none
     @Environment(\.dismiss) private var dismiss
     @State private var showCourseDebug = false
     @State private var showGallery = false
@@ -27,6 +33,7 @@ struct DeveloperView: View {
             VStack(spacing: 18) {
                 header
                 ConnectBar(hud: hud)
+                watchLink
                 MirrorView(frame: hud.frame).padding(14)
                     .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.10)))
                 motionControl
@@ -82,6 +89,53 @@ struct DeveloperView: View {
             Spacer()
             Circle().fill(hud.connection.isConnected ? phos : Color(white: 0.3)).frame(width: 8, height: 8)
             Text(hud.connection.label).font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+        }
+    }
+
+    /// The Watch: heart source for real runs, link state, recent messages.
+    private var watchLink: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("WATCH LINK").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                Spacer()
+                Circle().fill(watch.isReachable ? phos : Color(white: 0.3)).frame(width: 8, height: 8)
+                Text(watch.statusText.uppercased()).font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                    .accessibilityIdentifier("watchLinkStatus")
+            }
+            if let heartSource {
+                HStack(spacing: 10) {
+                    Text("HEART").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                    ForEach(HeartSource.allCases, id: \.self) { source in
+                        Button(source.title.uppercased()) { heart = source; heartSource.source = source }
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(heart == source ? phos : .gray)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(heart == source ? Color(white: 0.14) : .clear))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
+                            .accessibilityIdentifier("devHeart.\(source.rawValue)")
+                    }
+                }
+                .onAppear { heart = heartSource.source }
+            }
+            HStack(spacing: 18) {
+                Button("START WATCH WORKOUT") { watch.startWorkout { _ in } }
+                Button("END") { watch.endWorkout() }
+            }
+            .font(.system(size: 11, design: .monospaced)).foregroundColor(phos)
+            if let event = watch.lastEvent {
+                Text(event).font(.system(size: 11)).foregroundColor(Color(white: 0.5))
+            }
+            Text("\(watch.received) message\(watch.received == 1 ? "" : "s") from the Watch")
+                .font(.system(size: 11, design: .monospaced)).foregroundColor(.gray)
+                .accessibilityIdentifier("watchReceivedCount")
+            ForEach(watch.receipts.prefix(8)) { r in
+                HStack {
+                    Text(r.text).foregroundColor(.white)
+                    Spacer()
+                    Text("\(r.route.rawValue) · \(r.at.formatted(date: .omitted, time: .standard))").foregroundColor(.gray)
+                }
+                .font(.system(size: 10, design: .monospaced))
+            }
         }
     }
 

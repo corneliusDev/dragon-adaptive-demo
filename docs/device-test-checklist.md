@@ -97,3 +97,70 @@ end, tap END; the review then has SHARE LOG and SHARE RECORDING.
   your real steps a minute.
 - Report: the effort label seen at each pace, where the phone was carried,
   and the recording.
+
+## Chunk 12: Apple Watch and heart rate
+
+Set up for all of these: an iPhone with this build and a paired Apple Watch
+(watchOS 10+) with Dragon installed on it (it installs with the iPhone app;
+check the Watch app on the iPhone › Available Apps if not). Signing needs a
+team with the HealthKit capability for both targets (the simulator builds
+don't). Allow Health access when asked (the first START with the Watch, or
+FILL FROM HEALTH). Before START on the live run screen, pick **Phone
+sensors** and under "Heart rate from" pick **Watch**. The live screen's
+Sensors line shows "Watch HR 152 · 1.2 s behind" while it flows; the
+Developer menu (gear) › WATCH LINK lists each message as it arrives, with
+its route (mirroring or connectivity). In the simulator only the
+WatchConnectivity fallback was exercised (synthetic heart rate:
+docs/screenshots/chunk12-*); workout mirroring and HealthKit's real heart
+rate need these device checks.
+
+### 12.1 Heart rate reaches the phone in under 5 s, over 10 minutes
+- Do: START a Phone sensors run with the Watch. Check the Watch opens
+  Dragon by itself and starts a workout (heart rate and elapsed time on the
+  Watch). Walk or jog for 10 minutes with both screens on, glancing at the
+  phone's Sensors line now and then. END on the phone.
+- Expect: the Watch workout starts within a few seconds of START, without
+  touching the Watch; the WATCH LINK route says "mirroring" (the
+  "connectivity" route only before mirroring is up); the Sensors line's
+  delay stays under 5 s and heart rate never shows "missing"; END on the
+  phone ends the workout on the Watch (and it appears in Health › Workouts).
+- Report: the largest delay you saw, the routes listed, and the run's
+  recording (Review › SHARE RECORDING: its vitals with source "watch").
+
+### 12.2 60 minutes with the Watch screen off
+- Do: START as in 12.1, lower the wrist (screen off) and lock the phone in
+  a pocket; run or walk 60 minutes without looking. END on the Watch this
+  time (STOP).
+- Expect: the phone's run ends by itself when the Watch workout is stopped
+  (it goes to the review). The recording has a Watch heart rate every few
+  seconds for the whole hour (no gap longer than 5 s apart from 12.3-style
+  range loss) and wrist effort once a second; the review's heart-rate cues
+  (if any) fire as for a synthetic run.
+- Report: PASS/FAIL, the longest gap in the recording's Watch vitals, the
+  Watch battery used, and the recording.
+- Note: the iPhone app has the location background mode (it keeps running
+  for the run) but not "workout-processing" (chunk 11's test pins the
+  background modes to location only). If mirroring fails to reach a locked
+  phone, report it: adding workout-processing needs that test changed.
+
+### 12.3 Out of Bluetooth range and back
+- Do: during a run as in 12.1, leave the phone somewhere and walk away with
+  the Watch until the phone's Sensors line says "Watch HR missing" (or
+  60 s), then walk back.
+- Expect: within 5 s of losing the Watch the live screen's Heart shows "—"
+  and the Sensors line says "Watch HR missing (N s)"; heart-rate cues stop
+  (missing data, not the last value). Back in range, heart rate resumes by
+  itself within a few seconds without touching either device; readings
+  queued during the gap are not back-filled (WATCH LINK counts them as
+  dropped; the recording has no Watch vitals inside the gap).
+- Report: how long the gap was, how long until HR resumed, and the
+  recording.
+
+### 12.4 Fill from Health
+- Do: on a phone whose Health has resting heart rate (from the Watch) and
+  a date of birth, open a plan, tap FILL FROM HEALTH, allow access.
+- Expect: Rest, Threshold and Max fill in (threshold 88% of the way from
+  rest to max); the label reads "Heart rate zones · from Health" and the
+  note says where max came from. With access denied, the note says Health
+  had nothing and how to fix it; the fields are left as they were.
+- Report: the numbers filled, compared with Health's own resting HR.

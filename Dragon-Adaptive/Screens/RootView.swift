@@ -43,6 +43,9 @@ struct RootView: View {
         self.environment = environment
         self.hud = hud
         _home = State(initialValue: HomeModel(environment: environment))
+        #if DEBUG
+        _showDeveloper = State(initialValue: ProcessInfo.processInfo.arguments.contains("-watchDemo"))
+        #endif
     }
 
     var body: some View {
@@ -60,7 +63,8 @@ struct RootView: View {
                           onReplay: { record in
                               showDeveloper = false
                               replay(record)
-                          })
+                          },
+                          heartSource: environment.heartSource)
         }
         .alert(alert ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
             Button("OK", role: .cancel) {}
@@ -82,7 +86,8 @@ struct RootView: View {
         case .live:
             if let live = flow.live {
                 LiveRunScreen(model: live, hud: hud, onEnd: { end(live) },
-                              onSourceChange: { switchSource(of: live, to: $0) })
+                              onSourceChange: { switchSource(of: live, to: $0) },
+                              onHeartChange: { show(setup.switchHeart(of: live, to: $0)) })
             }
         case .review:
             if let review = flow.review {

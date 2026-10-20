@@ -27,6 +27,11 @@
 //  the run did. A real run finishes when the engine's distance reaches the
 //  plan's.
 //
+//  A phone run's heart rate comes from the Watch, the synthetic Watch or
+//  nowhere (HeartSource, on the sensors). With the Watch, START also starts
+//  the Watch workout and END ends it; ending the workout on the Watch sets
+//  `endedOnWatch`, and the live screen ends the run as if END were tapped.
+//
 //  END saves the cue log and a RunRecord through the RunStore (and, for a
 //  phone run, its recording) and hands the record to the review. Plain Swift
 //  (Observation), no SwiftUI.
@@ -105,6 +110,8 @@ final class LiveRunModel {
     private(set) var record: RunRecord?
     /// "GPS ±5 m · 312 fixes · motion, cadence, altitude" (phone runs).
     private(set) var sensorText: String?
+    /// The Watch workout was ended on the Watch: the run should end too.
+    private(set) var endedOnWatch = false
 
     /// Each new frame, for the glasses.
     @ObservationIgnored var onFrame: ((HUDFrame) -> Void)?
@@ -188,6 +195,8 @@ final class LiveRunModel {
         if let run { return run.time + afterFinish }
         return pacer.lastUpdate ?? 0
     }
+    /// Where a phone run's heart rate comes from; nil for other runs.
+    var heartSource: HeartSource? { sensors?.heartSource }
     /// 1x / 10x applies (not to a real run).
     var hasSpeeds: Bool { kind != .phone }
     var isFinished: Bool { finishTime != nil }
@@ -214,6 +223,7 @@ final class LiveRunModel {
         case .phone:
             status = Status(headline: "Starting", detail: "Waiting for the first GPS fix")
             sensors?.onEvent = { [weak self] event in self?.received(event) }
+            sensors?.onEndedRemotely = { [weak self] in self?.endedOnWatch = true }
             sensors?.start()
             sensorText = sensors?.summary
         case .replay:

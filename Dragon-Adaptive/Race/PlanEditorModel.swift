@@ -75,6 +75,12 @@ final class PlanEditorModel {
     private(set) var courseNotice: String?
     /// Why the last import failed.
     private(set) var importError: String?
+    /// "From Health: rest 52, max 188 (highest recorded)", or why Health had nothing.
+    private(set) var healthNote: String?
+    /// The zone numbers were last filled from Health.
+    private(set) var zonesFromHealth = false
+    /// Waiting for Health.
+    private(set) var readingHealth = false
 
     init(plan: SavedPlan? = nil, limits: PlanLimits = PlanLimits()) {
         self.limits = limits
@@ -104,6 +110,45 @@ final class PlanEditorModel {
         }
         if let course = p?.course {
             setCourse(course, fileName: p?.courseFileName ?? "course.gpx")
+        }
+    }
+
+    // MARK: Apple Health
+
+    /// "Fill from Health": asks for Health access (once), reads resting and
+    /// maximum heart rate and fills the three zone numbers (HealthZoneEstimate).
+    /// The numbers can still be edited; `completion` runs when done (tests).
+    func fillFromHealth(_ health: HealthStoreProviding, config: HealthZoneEstimate.Config = .init(),
+                        completion: @escaping () -> Void = {}) {
+        guard health.isAvailable else {
+            healthNote = "Apple Health isn't available on this device. Type the numbers in."
+            return completion()
+        }
+        readingHealth = true
+        health.requestAuthorization { [weak self] _ in
+            health.heartRates(lookBackDays: config.lookBackDays) { rates in
+                guard let self else { return completion() }
+                self.readingHealth = false
+                self.applyHealth(rates, config: config)
+                completion()
+            }
+        }
+    }
+
+    private func applyHealth(_ rates: HealthHeartRates, config: HealthZoneEstimate.Config) {
+        switch HealthZoneEstimate.make(from: rates, config: config) {
+        case .success(let e):
+            resting = String(Int(e.resting))
+            threshold = String(Int(e.threshold))
+            maxHeartRate = String(Int(e.max))
+            zonesFromHealth = true
+            healthNote = "From Health: rest \(Int(e.resting)), max \(Int(e.max)) (\(e.maxSource)); threshold at \(Int(config.thresholdFractionOfReserve * 100))% of the way from rest to max. Edit any of them."
+        case .failure(.noResting):
+            healthNote = "Health has no resting heart rate (or Dragon isn't allowed to read it). Wear the Watch for a day, check Settings › Health › Data Access, or type the numbers in."
+        case .failure(.noMax):
+            healthNote = "Health has no heart rate history or date of birth to set a max from. Type the numbers in."
+        case .failure(.outOfOrder):
+            healthNote = "Health's numbers don't make sense (max not above resting). Type them in."
         }
     }
 

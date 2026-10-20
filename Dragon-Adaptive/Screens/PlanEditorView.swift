@@ -18,6 +18,8 @@ struct PlanEditorView: View {
     var onDelete: (() -> Void)?
     /// Saves the plan; returns nil and leaves the messages showing while there are problems.
     var save: (PlanEditorModel) -> SavedPlan? = { $0.makePlan() }
+    /// Apple Health, for "Fill from Health".
+    var health: HealthStoreProviding = SystemHealthStore.shared
 
     @State private var importing = false
     @FocusState private var focused: Bool
@@ -97,14 +99,20 @@ struct PlanEditorView: View {
 
                 courseField
 
-                Field(label: "Heart rate zones · typed in") {
+                Field(label: "Heart rate zones · \(model.zonesFromHealth ? "from Health" : "typed in")") {
                     HStack(spacing: 10) {
                         zoneInput("Rest", $model.resting, "52", "zoneRest")
                         zoneInput("Threshold", $model.threshold, "172", "zoneThreshold")
                         zoneInput("Max", $model.maxHeartRate, "188", "zoneMax")
                     }
-                    Text("From Apple Health in a later update. Leave empty to skip heart rate cues.")
+                    Text(model.healthNote ?? "Fill from Apple Health, or type them in. Leave empty to skip heart rate cues.")
                         .font(.system(size: 12)).foregroundColor(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("healthNote")
+                    Button(model.readingHealth ? "READING HEALTH…" : "FILL FROM HEALTH") { model.fillFromHealth(health) }
+                        .disabled(model.readingHealth)
+                        .font(Theme.mono(11, weight: .semibold)).foregroundColor(Theme.phos).padding(.top, 2)
+                        .accessibilityIdentifier("fillFromHealth")
                 }
 
                 Field(label: "Fuel") {
