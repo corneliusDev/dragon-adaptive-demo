@@ -2,13 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Merged into the generated Info.plist (GENERATE_INFOPLIST_FILE). Keys the
      INFOPLIST_KEY_ build settings can't express: background location, so a
-     phone-sensor run keeps recording with the screen locked. That also
-     keeps the app running for the Watch's mirrored workout during a run. -->
+     phone-sensor run keeps recording with the screen locked; and workout
+     processing, so the phone keeps receiving the Watch's mirrored workout. -->
 <plist version="1.0">
 <dict>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<string>workout-processing</string>
 	</array>
 </dict>
 </plist>

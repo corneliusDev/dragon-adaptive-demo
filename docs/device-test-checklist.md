@@ -138,10 +138,9 @@ rate need these device checks.
   (if any) fire as for a synthetic run.
 - Report: PASS/FAIL, the longest gap in the recording's Watch vitals, the
   Watch battery used, and the recording.
-- Note: the iPhone app has the location background mode (it keeps running
-  for the run) but not "workout-processing" (chunk 11's test pins the
-  background modes to location only). If mirroring fails to reach a locked
-  phone, report it: adding workout-processing needs that test changed.
+- Note: the iPhone app has both the location and "workout-processing"
+  background modes, so mirrored heart rate should keep reaching a locked
+  phone. If it doesn't, report how long it ran before stopping.
 
 ### 12.3 Out of Bluetooth range and back
 - Do: during a run as in 12.1, leave the phone somewhere and walk away with

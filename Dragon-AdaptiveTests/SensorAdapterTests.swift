@@ -227,7 +227,7 @@ final class AppInfoTests: XCTestCase {
         let info = Bundle.main.infoDictionary ?? [:]
         XCTAssertFalse((info["NSLocationWhenInUseUsageDescription"] as? String ?? "").isEmpty)
         XCTAssertTrue((info["NSMotionUsageDescription"] as? String ?? "").contains("cadence"))
-        XCTAssertEqual(info["UIBackgroundModes"] as? [String], ["location"])
+        XCTAssertEqual(info["UIBackgroundModes"] as? [String], ["location", "workout-processing"])
         XCTAssertTrue(SystemLocationProvider.hasBackgroundLocationMode)
     }
 }
