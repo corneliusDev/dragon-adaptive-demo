@@ -3,7 +3,9 @@
 //  plan later doesn't rewrite history), how it ended, the splits, and the
 //  cue log file. RunStore keeps records as JSON (Runs/<id>.json) and the cue
 //  logs as JSON lines through CueLogStore, so the review's rating goes back
-//  into the same log file that SHARE exports.
+//  into the same log file that SHARE exports. A run from the phone's sensors
+//  also keeps its RunRecording (every input the engine saw) beside the log,
+//  in Documents/Recordings, for replay.
 
 import Foundation
 import DragonEngine
@@ -41,6 +43,9 @@ struct RunRecord: Codable, Equatable, Identifiable {
     var cueLogFile: String
     /// Where the run's data came from ("Synthetic race"), for the list.
     var source: String
+    /// File name of the run's RunRecording in the store's recordings folder;
+    /// nil for runs that weren't recorded (synthetic races, replays).
+    var recordingFile: String?
 
     var finished: Bool { finishTime != nil }
 
@@ -50,10 +55,12 @@ struct RunRecord: Codable, Equatable, Identifiable {
     }
 }
 
-/// Past runs: records in `runs`, cue logs in `cueLogs` (Documents/CueLogs in the app).
+/// Past runs: records in `runs`, cue logs in `cueLogs` (Documents/CueLogs in
+/// the app), recordings in `recordings` (Documents/Recordings).
 struct RunStore {
     let runs: URL
     let cueLogs: URL
+    let recordings: URL
 
     private var logStore: CueLogStore { CueLogStore(directory: cueLogs) }
 
@@ -87,8 +94,33 @@ struct RunStore {
 
     func logURL(for record: RunRecord) -> URL { cueLogs.appendingPathComponent(record.cueLogFile) }
 
+    // MARK: Recordings
+
+    /// Writes a run's recording as `<name>.json`; returns the file name.
+    @discardableResult
+    func saveRecording(_ recording: RunRecording, name: String) throws -> String {
+        try FileManager.default.createDirectory(at: recordings, withIntermediateDirectories: true)
+        let file = (CueLogStore.fileName(name) as NSString).deletingPathExtension + ".json"
+        try recording.jsonData().write(to: recordings.appendingPathComponent(file), options: .atomic)
+        return file
+    }
+
+    /// The run's recording; nil when it has none.
+    func recording(for record: RunRecord) throws -> RunRecording? {
+        guard let url = recordingURL(for: record) else { return nil }
+        return try RunRecording(jsonData: Data(contentsOf: url))
+    }
+
+    func recordingURL(for record: RunRecord) -> URL? {
+        record.recordingFile.map { recordings.appendingPathComponent($0) }
+    }
+
+    /// Past runs with a recording, newest first.
+    func recorded() -> [RunRecord] { load().filter { $0.recordingFile != nil } }
+
     func delete(_ record: RunRecord) throws {
         try? FileManager.default.removeItem(at: logURL(for: record))
+        if let url = recordingURL(for: record) { try? FileManager.default.removeItem(at: url) }
         try FileManager.default.removeItem(at: url(record.id))
     }
 

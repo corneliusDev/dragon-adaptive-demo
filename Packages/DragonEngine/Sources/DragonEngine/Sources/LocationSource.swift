@@ -1,5 +1,5 @@
 //  LocationSource.swift
-//  GPS input. Today: SyntheticRun or a ReplaySource. Next: CoreLocation in the app.
+//  GPS input: SyntheticRun, a ReplaySource, or the app's CoreLocationSource.
 //  Same idea as VitalsSource — the engine only sees LocationSamples, never
 //  where they came from. Metres, seconds and degrees, like CLLocation.
 

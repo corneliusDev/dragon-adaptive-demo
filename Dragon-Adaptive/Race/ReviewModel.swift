@@ -128,6 +128,8 @@ final class ReviewModel {
 
     /// The saved log file, for SHARE and the full log.
     var logURL: URL { store.logURL(for: record) }
+    /// The run's recording (phone-sensor runs), for sharing; nil when it has none.
+    var recordingURL: URL? { store.recordingURL(for: record) }
 }
 
 /// The home screen's lists: saved plans and past runs.

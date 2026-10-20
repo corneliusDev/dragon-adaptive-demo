@@ -36,11 +36,8 @@ enum VitalsMode {
 final class HUDController: ObservableObject {
     @Published var connection: ConnectionState = .idle
     @Published var frame = HUDFrame()
-    @Published var motion: Double = 0 {
-        didSet {
-            motionSource.manualValue = motion
-        }
-    }
+    /// The motion slider (0–100): the legacy demos' motion input.
+    @Published var motion: Double = 0
     @Published var running = false
     @Published var scenarioKey = "tri"
     @Published var flywheel = 0
@@ -90,7 +87,6 @@ final class HUDController: ObservableObject {
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
     private let session = GlassesSession()
     private let sim = SimulatedAttentionSource()
-    private let motionSource = MotionSource()
     private let synthetic = SyntheticVitalsSource()
     private let race = SyntheticRaceSource()
 
@@ -211,7 +207,6 @@ final class HUDController: ObservableObject {
             }
         }
 
-        motionSource.start()
         startLoop()
     }
 
@@ -220,7 +215,6 @@ final class HUDController: ObservableObject {
         timer?.invalidate()
         synthetic.stop()
         race.stop()
-        motionSource.stop()
         gesture?.stop()
         session.disconnect()
     }
@@ -504,7 +498,7 @@ final class HUDController: ObservableObject {
     }
 
     private func step(dt: Double) {
-        engine.motion = motionSource.value
+        engine.motion = motion
         engine.measuredHeartRate = freshHeartRate
 
         // The legacy engine keeps ticking (attention, band labels) either way.

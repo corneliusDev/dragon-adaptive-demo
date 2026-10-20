@@ -1,20 +1,35 @@
 //  LiveRunModel.swift
-//  The live run screen's state. For now the run's data is a synthetic race
-//  generated from the chosen plan (its distance, target, pacing and course,
-//  or the synthetic course when none was imported), played at 1x or 10x;
-//  chunk 11 swaps in the phone's sensors and chunk 12 the Watch. Everything
-//  it sends goes through a RunEngine built from the plan, and the engine's
+//  The live run screen's state. The run's data comes from one of three feeds:
+//
+//      synthetic  a synthetic race generated from the chosen plan (its
+//                 distance, target, pacing and course, or the synthetic
+//                 course when none was imported), played at 1x or 10x.
+//      phone      the phone's own sensors (PhoneSensorRun: GPS, motion,
+//                 pedometer, barometer) on a real run, in real time.
+//      replay     a real run's RunRecording played back at 1x or 10x.
+//
+//  Everything goes through a RunEngine built from the plan, and the engine's
 //  frame goes to the phone mirror and (through `onFrame`) the glasses.
 //
-//  The model owns race time: a Foundation timer ticks 20 times a second and
-//  each tick advances the race by tick × speed, in steps of at most
-//  `Config.maxStep` race seconds so the engine sees the race at the rate it
-//  would live. Tests call advance(realSeconds:) instead of the timer. After
-//  the finish, race time runs on for `Config.afterFinish` so the result shows
-//  on the glasses for its 10 s and the display goes dark.
+//  Synthetic: the model owns race time. A Foundation timer ticks 20 times a
+//  second and each tick advances the race by tick × speed, in steps of at
+//  most `Config.maxStep` race seconds so the engine sees the race at the rate
+//  it would live. Tests call advance(realSeconds:) instead of the timer.
+//  After the finish, race time runs on for `Config.afterFinish` so the result
+//  shows on the glasses for its 10 s and the display goes dark.
 //
-//  END saves the cue log and a RunRecord through the RunStore and hands the
-//  record to the review. Plain Swift (Observation), no SwiftUI.
+//  Phone and replay: a RunPacer updates the engine on a fixed grid of run
+//  time (four times a second), the phone's a couple of seconds behind the
+//  sensors so late readings make it. Each sensor reading also nudges the
+//  pacer, so the run keeps going with the screen locked even if the timer
+//  doesn't fire. A phone run records every input the engine takes; a replay
+//  plays a recording on the grid it was made on, so it decides exactly as
+//  the run did. A real run finishes when the engine's distance reaches the
+//  plan's.
+//
+//  END saves the cue log and a RunRecord through the RunStore (and, for a
+//  phone run, its recording) and hands the record to the review. Plain Swift
+//  (Observation), no SwiftUI.
 
 import Foundation
 import Observation
@@ -33,6 +48,20 @@ final class LiveRunModel {
         var speeds: [Double] = [1, 10]
         /// Seed for the synthetic race.
         var seed: UInt64 = 42
+        /// Engine update grid and sensor lag for phone runs (replays use the recording's grid).
+        var pacer = RunPacer.Config()
+    }
+
+    /// Where the run's data comes from.
+    enum Feed {
+        case synthetic(SyntheticProfile)
+        case phone(PhoneSensorRun)
+        /// A recording, with a label for the screen ("Park 5K, 18 Oct").
+        case replay(RunRecording, label: String)
+    }
+
+    enum Kind: Equatable {
+        case synthetic, phone, replay
     }
 
     /// What the engine is doing, in plain words.
@@ -47,10 +76,15 @@ final class LiveRunModel {
     let config: Config
     /// Extra speed from the UI test hook (AppEnvironment.timeScale).
     let timeScale: Double
+    let kind: Kind
     /// Where the data comes from, for the screen and the record.
-    let sourceName = "Synthetic race"
-    /// The synthetic runner's behaviour.
-    let profile: SyntheticProfile
+    let sourceName: String
+    /// The synthetic runner's behaviour (synthetic runs).
+    let profile: SyntheticProfile?
+    /// The phone's sensors (phone runs).
+    let sensors: PhoneSensorRun?
+    /// What the phone run may use, and the explanations (phone runs).
+    let permissions: SensorPermissions?
 
     /// 1x or 10x.
     var speed: Double = 1
@@ -69,36 +103,93 @@ final class LiveRunModel {
     private(set) var cuesShown = 0
     /// The finished record, once END has saved it.
     private(set) var record: RunRecord?
+    /// "GPS ±5 m · 312 fixes · motion, cadence, altitude" (phone runs).
+    private(set) var sensorText: String?
 
     /// Each new frame, for the glasses.
     @ObservationIgnored var onFrame: ((HUDFrame) -> Void)?
 
     @ObservationIgnored private(set) var engine: RunEngine
-    @ObservationIgnored private var run: SyntheticRun
+    @ObservationIgnored private var run: SyntheticRun?
+    /// Phone and replay: the update grid, and what a phone run has recorded.
+    @ObservationIgnored private(set) var pacer: RunPacer
+    @ObservationIgnored private(set) var recorder: RunRecorder?
+    @ObservationIgnored private var replay: ReplaySource?
+    /// Replay: run time played so far, and where the recording ends.
+    @ObservationIgnored private var replayTime: TimeInterval = 0
+    @ObservationIgnored private var replayEnd: TimeInterval = 0
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var afterFinish: TimeInterval = 0
     @ObservationIgnored private var finishSent = false
     @ObservationIgnored private var startedAt = Date()
     @ObservationIgnored private var heldBackMarker = 0
 
-    init(plan: SavedPlan, profile: SyntheticProfile = .onPlan, timeScale: Double = 1, config: Config = Config()) {
-        self.plan = plan
-        self.profile = profile
-        self.timeScale = timeScale
-        self.config = config
-        let runPlan = plan.runPlan
-        run = SyntheticRun(profile: profile, seed: config.seed, plan: runPlan)
-        var engineConfig = RunEngine.Config(unit: plan.unit)
-        engineConfig.display = plan.display
-        engineConfig.name = plan.name
-        // The synthetic race fills in the synthetic course when the plan has none.
-        engine = RunEngine(plan: run.plan, config: engineConfig)
+    convenience init(plan: SavedPlan, profile: SyntheticProfile = .onPlan, timeScale: Double = 1,
+                     config: Config = Config()) {
+        self.init(plan: plan, feed: .synthetic(profile), timeScale: timeScale, config: config)
     }
 
-    deinit { timer?.invalidate() }
+    init(plan: SavedPlan, feed: Feed, timeScale: Double = 1, config: Config = Config()) {
+        self.plan = plan
+        self.timeScale = timeScale
+        self.config = config
+        let engineConfig = LiveRunModel.engineConfig(for: plan)
+        switch feed {
+        case .synthetic(let profile):
+            kind = .synthetic
+            sourceName = "Synthetic race"
+            self.profile = profile
+            sensors = nil
+            permissions = nil
+            let synthetic = SyntheticRun(profile: profile, seed: config.seed, plan: plan.runPlan)
+            run = synthetic
+            pacer = RunPacer(config: config.pacer)
+            // The synthetic race fills in the synthetic course when the plan has none.
+            engine = RunEngine(plan: synthetic.plan, config: engineConfig)
+        case .phone(let sensors):
+            kind = .phone
+            sourceName = "Phone sensors"
+            profile = nil
+            self.sensors = sensors
+            permissions = SensorPermissions(sensors.providers)
+            pacer = RunPacer(config: config.pacer)
+            recorder = RunRecorder(name: plan.name, plan: plan.runPlan, unit: plan.unit, display: plan.display)
+            engine = RunEngine(plan: plan.runPlan, config: engineConfig)
+        case .replay(let recording, let label):
+            kind = .replay
+            sourceName = "Replay: \(label)"
+            profile = nil
+            sensors = nil
+            permissions = nil
+            replay = ReplaySource(recording)
+            replayEnd = recording.endedAt ?? recording.duration
+            pacer = RunPacer(config: RunPacer.Config(step: recording.updateStep ?? config.pacer.step, lag: 0))
+            engine = RunEngine(plan: recording.plan ?? plan.runPlan, config: engineConfig)
+        }
+    }
 
-    /// Race run time: the run's own until the finish, then counting on.
-    var raceTime: TimeInterval { run.time + afterFinish }
+    deinit {
+        timer?.invalidate()
+        sensors?.stop()
+    }
+
+    /// The engine's settings for a plan: its unit, display setting and name.
+    /// A replay uses the same, so it decides as the run did.
+    static func engineConfig(for plan: SavedPlan) -> RunEngine.Config {
+        var c = RunEngine.Config(unit: plan.unit)
+        c.display = plan.display
+        c.name = plan.name
+        return c
+    }
+
+    /// Race run time: synthetic, the run's own until the finish, then
+    /// counting on; phone and replay, the engine's latest update.
+    var raceTime: TimeInterval {
+        if let run { return run.time + afterFinish }
+        return pacer.lastUpdate ?? 0
+    }
+    /// 1x / 10x applies (not to a real run).
+    var hasSpeeds: Bool { kind != .phone }
     var isFinished: Bool { finishTime != nil }
     var unit: DistanceUnit { plan.unit }
 
@@ -106,24 +197,42 @@ final class LiveRunModel {
 
     /// The gun: the engine sees the runner at the line, then the clock runs.
     /// `timer: false` (tests) leaves advancing to advance(realSeconds:).
+    /// A phone run needs location: without it, nothing starts (the screen
+    /// shows why, and offers synthetic data).
     func start(timer useTimer: Bool = true) {
         guard !hasStarted else { return resume(timer: useTimer) }
+        if kind == .phone && !(permissions?.canRun ?? false) {
+            permissions?.prepare()
+            return
+        }
         hasStarted = true
         startedAt = Date()
-        for event in run.advance(by: 0) { engine.ingest(event) }
-        publish(engine.update(at: 0))
+        switch kind {
+        case .synthetic:
+            for event in run?.advance(by: 0) ?? [] { engine.ingest(event) }
+            publish(engine.update(at: 0))
+        case .phone:
+            status = Status(headline: "Starting", detail: "Waiting for the first GPS fix")
+            sensors?.onEvent = { [weak self] event in self?.received(event) }
+            sensors?.start()
+            sensorText = sensors?.summary
+        case .replay:
+            advanceReplay(by: 0)
+        }
         resume(timer: useTimer)
     }
 
     func pause() {
         timer?.invalidate()
         timer = nil
+        if isRunning { sensors?.pause() }
         isRunning = false
     }
 
     func resume(timer useTimer: Bool = true) {
         guard hasStarted, !isRunning else { return }
         isRunning = true
+        if kind == .phone { sensors?.resume() }
         guard useTimer else { return }
         let t = Timer(timeInterval: config.tick, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -138,24 +247,43 @@ final class LiveRunModel {
     /// A glance or held look from the glasses (or the developer LOOK button).
     func receive(_ event: AttentionEvent) {
         guard hasStarted, !isFinished else { return }
-        engine.ingest(.attention(AttentionSample(t: raceTime, event: event)))
+        switch kind {
+        case .synthetic:
+            engine.ingest(.attention(AttentionSample(t: raceTime, event: event)))
+        case .phone:
+            // Held by the pacer like any input, so the recording replays it.
+            pacer.receive(.attention(AttentionSample(t: sensors?.runTime ?? 0, event: event)))
+        case .replay:
+            break   // the recording has the run's own
+        }
     }
 
     /// Advances the race by `realSeconds` × speed (× the test time scale).
+    /// A phone run follows the sensors' clock instead: it runs every update due.
     func advance(realSeconds: TimeInterval) {
         guard isRunning else { return }
+        switch kind {
+        case .synthetic: advanceSynthetic(realSeconds: realSeconds)
+        case .phone: advancePhone()
+        case .replay: advanceReplay(by: realSeconds * speed * timeScale)
+        }
+    }
+
+    private func advanceSynthetic(realSeconds: TimeInterval) {
+        // run is mutated in place (run?.…), never copied out: it's a big value.
+        guard run != nil else { return }
         var remaining = realSeconds * speed * timeScale
         var last: RunEngine.Step?
         while remaining > 1e-9 {
             if isFinished && afterFinish >= config.afterFinish { break }
             let dt = min(remaining, config.maxStep)
             remaining -= dt
-            if run.isFinished {
+            if run?.isFinished == true {
                 afterFinish = min(afterFinish + dt, config.afterFinish)
             } else {
-                for event in run.advance(by: dt) { engine.ingest(event) }
+                for event in run?.advance(by: dt) ?? [] { engine.ingest(event) }
             }
-            if run.isFinished && !finishSent, let crossed = run.finishTime {
+            if run?.isFinished == true && !finishSent, let crossed = run?.finishTime {
                 finishSent = true
                 engine.finish(at: crossed)
                 finishTime = crossed
@@ -167,17 +295,60 @@ final class LiveRunModel {
         if isFinished && afterFinish >= config.afterFinish { pause() }
     }
 
+    /// A reading from the phone: held for its update, and a nudge to run what's due.
+    private func received(_ event: RunEvent) {
+        pacer.receive(event)
+        if isRunning { advancePhone() }
+    }
+
+    private func advancePhone() {
+        guard let sensors else { return }
+        runPacer(to: sensors.runTime)
+        sensorText = sensors.summary
+    }
+
+    private func advanceReplay(by dt: TimeInterval) {
+        guard let replay else { return }
+        replayTime = min(replayTime + dt, replayEnd)
+        for event in replay.samples(until: replayTime) { pacer.receive(event) }
+        runPacer(to: replayTime)
+        if replayTime >= replayEnd { pause() }
+    }
+
+    /// Runs the pacer's due updates (recording what a phone run's engine takes)
+    /// and shows the latest.
+    private func runPacer(to now: TimeInterval) {
+        var last: RunEngine.Step?
+        while let update = pacer.nextUpdate(by: now) {
+            for event in update.inputs {
+                engine.ingest(event)
+                recorder?.record(event)
+            }
+            let step = engine.update(at: update.t)
+            noteHeldBack(step)
+            last = step
+        }
+        if finishTime == nil, let crossed = engine.log.header.finishTime { finishTime = crossed }
+        if let last { publish(last) }
+    }
+
     /// Stops the run, saves its cue log and record, and returns the record.
     @discardableResult
     func end(store: RunStore) throws -> RunRecord {
         pause()
+        sensors?.stop()
         if let record { return record }
         let log = engine.log
-        let fileName = CueLogStore.fileName(CueLogStore.runName(plan.name, at: startedAt))
-        let r = RunRecord(plan: plan, startedAt: startedAt, finishTime: finishTime, endedAt: raceTime,
+        let runName = CueLogStore.runName(plan.name, at: startedAt)
+        let fileName = CueLogStore.fileName(runName)
+        var r = RunRecord(plan: plan, startedAt: startedAt, finishTime: finishTime, endedAt: raceTime,
                           distance: state?.distance ?? 0,
                           splits: engine.split.splits.map(SplitRecord.init),
                           cueLogFile: fileName, source: sourceName)
+        if let recorder, hasStarted {
+            recorder.noteUpdates(step: pacer.config.step, through: pacer.lastUpdate ?? 0)
+            r.recordingFile = try store.saveRecording(recorder.recording, name: runName)
+        }
         try store.save(r, log: log)
         record = r
         return r

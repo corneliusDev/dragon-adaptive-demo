@@ -13,7 +13,9 @@
 //                 fixes carry it, which is far steadier than differencing
 //                 positions; otherwise a least-squares fit of distance on time.
 //      GAP        60 s pace ÷ the mean GradeModel factor over the metres that
-//                 window covered (course elevation, or GPS altitude with no course).
+//                 window covered (course elevation; with no course, the
+//                 iPhone barometer's altitude when it covers the stretch,
+//                 else GPS altitude).
 //      projection elapsed + the plan's time for the rest of the course (grade
 //                 included), stretched by how far the runner's grade-adjusted
 //                 5-minute pace is off plan, counting only as much as the
@@ -67,6 +69,10 @@ public struct StateEstimator {
         public var effortHistory: TimeInterval = 240
         /// Movement phase thresholds.
         public var phase = MovementPhaseClassifier.Config()
+        /// A barometric altitude reading this old (seconds) at a fix no longer
+        /// counts as the fix's altitude. The phone's altimeter reports every
+        /// second or few while the pressure changes.
+        public var barometerStaleAfter: TimeInterval = 5
 
         public init() {}
     }
@@ -87,6 +93,8 @@ public struct StateEstimator {
         let latitude: Double
         let longitude: Double
         let altitude: Double?
+        /// Barometric altitude at this fix (relative), when a fresh reading was in.
+        let baroAltitude: Double?
         let offCourse: Bool
         /// GradeModel factor where this fix was taken (1 when grade is unknown),
         /// so the phase classifier can compare speeds as if flat.
@@ -104,6 +112,8 @@ public struct StateEstimator {
     private var phoneMotion: SourceReading?
     private var watchCadence: SourceReading?
     private var phoneCadence: SourceReading?
+    /// Latest barometric altitude (phone), for the next fixes.
+    private var baroAltitude: SourceReading?
     private var lastAttention: AttentionSample?
     /// Motion readings from the last `effortHistory` seconds, per device, oldest first.
     private var watchEfforts: [EffortSample] = []
@@ -170,8 +180,9 @@ public struct StateEstimator {
             if let course { distance = min(max(distance, 0), course.totalDistance) }
         }
 
+        let baro = baroAltitude.flatMap { abs(s.t - $0.t) <= tuning.barometerStaleAfter ? $0.value : nil }
         fixes.append(Fix(t: s.t, measured: measured, distance: distance, speed: s.speed, latitude: s.latitude,
-                         longitude: s.longitude, altitude: s.altitude, offCourse: offCourse))
+                         longitude: s.longitude, altitude: s.altitude, baroAltitude: baro, offCourse: offCourse))
         fixes[fixes.count - 1].gradeFactor = grade(at: distance).map(GradeModel.paceFactor) ?? 1
         if let first = fixes.first, s.t - first.t > keep {
             fixes.removeFirst(fixes.firstIndex { s.t - $0.t <= keep } ?? 0)
@@ -198,6 +209,9 @@ public struct StateEstimator {
                 StateEstimator.update(&phoneMotion, value: m, sample: s)
                 append(&phoneEfforts, EffortSample(t: s.timestamp, value: m))
             }
+        }
+        if let a = s.altitude {
+            StateEstimator.update(&baroAltitude, value: a, sample: s)
         }
         if let c = s.cadence {
             if watch {
@@ -357,7 +371,7 @@ public struct StateEstimator {
     // MARK: Grade
 
     /// Mean GradeModel factor over a stretch: from the course when it has
-    /// elevation, else from GPS altitude; nil when neither is known.
+    /// elevation, else from barometric or GPS altitude; nil when none is known.
     private func meanGradeFactor(from d0: Double, to d1: Double) -> Double? {
         if let course {
             return course.hasElevation ? costs.meanFactor(from: d0, to: d1) : nil
@@ -373,13 +387,19 @@ public struct StateEstimator {
         return altitudeGrade(from: d - 100, to: d)
     }
 
-    /// Grade from GPS altitude against distance over a stretch (at least 50 m
-    /// of it, widened back if shorter). GPS altitude is noisy; this is a fallback.
+    /// Grade from altitude against distance over a stretch (at least 50 m of
+    /// it, widened back if shorter): the barometer's when its readings span the
+    /// stretch (far steadier), else GPS altitude, which is noisy. A fallback
+    /// for runs without a course.
     private func altitudeGrade(from d0: Double, to d1: Double) -> Double? {
         let lo = min(d0, d1 - 50)
-        let pts = fixes.compactMap { f in f.altitude.map { (x: f.distance, y: $0) } }.filter { $0.x >= lo && $0.x <= d1 }
-        guard let first = pts.first, let last = pts.last, last.x - first.x >= 50 else { return nil }
-        return StateEstimator.slope(pts)
+        func grade(_ altitude: (Fix) -> Double?) -> Double? {
+            let pts = fixes.compactMap { f in altitude(f).map { (x: f.distance, y: $0) } }
+                .filter { $0.x >= lo && $0.x <= d1 }
+            guard let first = pts.first, let last = pts.last, last.x - first.x >= 50 else { return nil }
+            return StateEstimator.slope(pts)
+        }
+        return grade(\.baroAltitude) ?? grade(\.altitude)
     }
 
     // MARK: Projection

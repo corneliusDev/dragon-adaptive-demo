@@ -55,7 +55,13 @@ struct RootView: View {
                      onDeveloper: { showDeveloper = true })
                 .navigationDestination(for: Route.self, destination: destination)
         }
-        .sheet(isPresented: $showDeveloper) { DeveloperView(hud: hud) }
+        .sheet(isPresented: $showDeveloper) {
+            DeveloperView(hud: hud, recordings: environment.runs.recorded(),
+                          onReplay: { record in
+                              showDeveloper = false
+                              replay(record)
+                          })
+        }
         .alert(alert ?? "", isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
             Button("OK", role: .cancel) {}
         }
@@ -75,7 +81,8 @@ struct RootView: View {
             }
         case .live:
             if let live = flow.live {
-                LiveRunScreen(model: live, hud: hud, onEnd: { end(live) })
+                LiveRunScreen(model: live, hud: hud, onEnd: { end(live) },
+                              onSourceChange: { switchSource(of: live, to: $0) })
             }
         case .review:
             if let review = flow.review {
@@ -103,12 +110,36 @@ struct RootView: View {
         path.removeLast()
     }
 
+    private var setup: LiveRunSetup { LiveRunSetup(environment: environment) }
+
     private func start(_ plan: SavedPlan) {
-        let model = LiveRunModel(plan: plan, timeScale: environment.timeScale)
+        show(setup.model(for: plan))
+        path.append(.live)
+    }
+
+    /// The live run's frames go to the glasses, the glasses' gestures to the run.
+    private func show(_ model: LiveRunModel) {
         model.onFrame = { [weak hud] frame in hud?.showRunFrame(frame) }
         hud.onAttention = { [weak model] event in model?.receive(event) }
         flow.live = model
-        path.append(.live)
+    }
+
+    private func switchSource(of model: LiveRunModel, to source: RunDataSource) {
+        show(setup.switchSource(of: model, to: source))
+    }
+
+    /// A recorded real run, played through the live screen (Developer menu).
+    private func replay(_ record: RunRecord) {
+        do {
+            guard let model = try setup.replay(record, store: environment.runs) else {
+                alert = "That run has no recording."
+                return
+            }
+            show(model)
+            path = [.live]
+        } catch {
+            alert = "Couldn't open that run's recording: \(error.localizedDescription)"
+        }
     }
 
     private func end(_ model: LiveRunModel) {

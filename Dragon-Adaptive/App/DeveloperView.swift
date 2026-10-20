@@ -3,13 +3,18 @@
 //  app's main screen. The legacy cycling / SOF scenario demos, the motion
 //  slider and source (SLIDER / WATCH / RACE), LOOK / WAVE, the synthetic race
 //  profile picker with 1x / 10x, the DISPLAY setting, the state overlay, the
-//  cue log, course debug and the screen gallery. Same HUDController as the
+//  cue log, course debug and the screen gallery, and the recordings of real
+//  runs to replay through the live run screen. Same HUDController as the
 //  main flow, so the glasses connection is shared.
 import SwiftUI
 import DragonEngine
 
 struct DeveloperView: View {
     @ObservedObject var hud: HUDController
+    /// Past runs with a recording (phone-sensor runs), newest first.
+    var recordings: [RunRecord] = []
+    /// Replay one through the live run screen.
+    var onReplay: (RunRecord) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
     @State private var showCourseDebug = false
     @State private var showGallery = false
@@ -28,6 +33,7 @@ struct DeveloperView: View {
                 scenarioControls
                 lookButton
                 telemetry
+                recordingList
                 Text("The engine decides what to surface and what to hide from motion + attention + context. Faster motion → fewer elements, bigger glyphs. Safety-critical context surfaces unprompted.")
                     .font(.system(size: 12)).foregroundColor(.gray).padding(.horizontal, 4)
                 #if DEBUG
@@ -76,6 +82,33 @@ struct DeveloperView: View {
             Spacer()
             Circle().fill(hud.connection.isConnected ? phos : Color(white: 0.3)).frame(width: 8, height: 8)
             Text(hud.connection.label).font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+        }
+    }
+
+    /// Real runs' recordings: tap one to replay it (its cues are decided again, identically).
+    private var recordingList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("RECORDINGS (REAL RUNS)").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+            if recordings.isEmpty {
+                Text("None yet. Run with Phone sensors and END the run to record one.")
+                    .font(.system(size: 11)).foregroundColor(Color(white: 0.4))
+            }
+            ForEach(recordings) { record in
+                Button { onReplay(record) } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(record.plan.name).font(.system(size: 12, design: .monospaced)).foregroundColor(.white)
+                            Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.resultText)")
+                                .font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                        }
+                        Spacer()
+                        Text("REPLAY").font(.system(size: 11, design: .monospaced)).foregroundColor(phos)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
+                }
+                .accessibilityIdentifier("replay.\(record.plan.name)")
+            }
         }
     }
 

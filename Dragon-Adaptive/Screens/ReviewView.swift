@@ -85,6 +85,11 @@ struct ReviewView: View {
                         .accessibilityIdentifier("fullLogButton")
                     ShareLink(item: model.logURL) { Text("SHARE LOG") }
                         .buttonStyle(CTAButtonStyle(ghost: true))
+                    if let recording = model.recordingURL {
+                        ShareLink(item: recording) { Text("SHARE RECORDING") }
+                            .buttonStyle(CTAButtonStyle(ghost: true))
+                            .accessibilityIdentifier("shareRecordingButton")
+                    }
                 }
             }
             .padding(16)

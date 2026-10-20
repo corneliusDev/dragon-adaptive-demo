@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		D35B04D42FDF0D0A008E4D41 /* ActiveLookSDK in Frameworks */ = {isa = PBXBuildFile; productRef = D35B04D32FDF0D0A008E4D41 /* ActiveLookSDK */; };
-		D35B04DA2FDF1B7C008E4D41 /* MotionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = D35B04D82FDF1B7C008E4D41 /* MotionSource.swift */; };
 		D35B04E32FDF2000008E4D41 /* DragonEngine in Frameworks */ = {isa = PBXBuildFile; productRef = D35B04E22FDF2000008E4D41 /* DragonEngine */; };
 /* End PBXBuildFile section */
 
@@ -33,7 +32,6 @@
 		D35B04852FDF0C78008E4D41 /* Dragon-Adaptive.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Dragon-Adaptive.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D35B04932FDF0C7C008E4D41 /* Dragon-AdaptiveTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Dragon-AdaptiveTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D35B049D2FDF0C7C008E4D41 /* Dragon-AdaptiveUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Dragon-AdaptiveUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		D35B04D82FDF1B7C008E4D41 /* MotionSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionSource.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -88,7 +86,6 @@
 				D35B04962FDF0C7C008E4D41 /* Dragon-AdaptiveTests */,
 				D35B04A02FDF0C7C008E4D41 /* Dragon-AdaptiveUITests */,
 				D35B04862FDF0C78008E4D41 /* Products */,
-				D35B04D92FDF1B7C008E4D41 /* Motion */,
 			);
 			sourceTree = "<group>";
 		};
@@ -100,14 +97,6 @@
 				D35B049D2FDF0C7C008E4D41 /* Dragon-AdaptiveUITests.xctest */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		D35B04D92FDF1B7C008E4D41 /* Motion */ = {
-			isa = PBXGroup;
-			children = (
-				D35B04D82FDF1B7C008E4D41 /* MotionSource.swift */,
-			);
-			path = Motion;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -260,7 +249,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D35B04DA2FDF1B7C008E4D41 /* MotionSource.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -420,8 +408,10 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Dragon-Adaptive-Info.plist";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Connects to glasses.";
-				INFOPLIST_KEY_NSMotionUsageDescription = "Adapts the display to motion.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Measures your distance and pace from GPS while a run is on, including with the screen locked, and keeps it in the run's recording on this iPhone.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Reads the motion sensors, step counter and barometer while a run is on to gauge your effort, cadence and hills.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -456,8 +446,10 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Dragon-Adaptive-Info.plist";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Connects to glasses.";
-				INFOPLIST_KEY_NSMotionUsageDescription = "Adapts the display to motion.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Measures your distance and pace from GPS while a run is on, including with the screen locked, and keeps it in the run's recording on this iPhone.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Reads the motion sensors, step counter and barometer while a run is on to gauge your effort, cadence and hills.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
