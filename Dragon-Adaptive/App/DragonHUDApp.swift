@@ -4,6 +4,6 @@ import SwiftUI
 @main
 struct DragonHUDApp: App {
     var body: some Scene {
-        WindowGroup { ContentView().preferredColorScheme(.dark) }
+        WindowGroup { RootView().preferredColorScheme(.dark) }
     }
 }

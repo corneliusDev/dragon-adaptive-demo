@@ -1,9 +1,16 @@
-//  ContentView.swift
+//  DeveloperView.swift
+//  The Developer menu (the gear on the home screen): what used to be the
+//  app's main screen. The legacy cycling / SOF scenario demos, the motion
+//  slider and source (SLIDER / WATCH / RACE), LOOK / WAVE, the synthetic race
+//  profile picker with 1x / 10x, the DISPLAY setting, the state overlay, the
+//  cue log, course debug and the screen gallery. Same HUDController as the
+//  main flow, so the glasses connection is shared.
 import SwiftUI
 import DragonEngine
 
-struct ContentView: View {
-    @StateObject private var hud = HUDController()
+struct DeveloperView: View {
+    @ObservedObject var hud: HUDController
+    @Environment(\.dismiss) private var dismiss
     @State private var showCourseDebug = false
     @State private var showGallery = false
     private let amber = Color(red: 1, green: 0.54, blue: 0.24)
@@ -59,10 +66,13 @@ struct ContentView: View {
 
     private var header: some View {
         HStack {
+            Button("DONE") { dismiss() }
+                .font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(phos)
+                .accessibilityIdentifier("developerDone")
             Text("DRAGON").font(.system(size: 13, weight: .bold, design: .monospaced))
                 .padding(.horizontal, 9).padding(.vertical, 5)
                 .background(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.25)))
-            Text("ADAPTIVE HUD").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+            Text("DEVELOPER").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
             Spacer()
             Circle().fill(hud.connection.isConnected ? phos : Color(white: 0.3)).frame(width: 8, height: 8)
             Text(hud.connection.label).font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
@@ -242,4 +252,8 @@ struct ContentView: View {
             Text(v).font(.system(size: 12, design: .monospaced)).foregroundColor(c)
         }.padding(.horizontal, 14).padding(.vertical, 11)
     }
+}
+
+#Preview("Developer menu") {
+    DeveloperView(hud: HUDController.shared).preferredColorScheme(.dark)
 }
