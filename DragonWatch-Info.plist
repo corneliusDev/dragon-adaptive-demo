@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the Watch app's generated Info.plist (GENERATE_INFOPLIST_FILE).
+     Keys the INFOPLIST_KEY_ build settings can't express: a SwiftUI watch
+     app (WKApplication), and workout processing, so the workout (heart rate,
+     wrist motion, sending to the phone) keeps running with the screen off. -->
+<plist version="1.0">
+<dict>
+	<key>WKApplication</key>
+	<true/>
+	<key>WKBackgroundModes</key>
+	<array>
+		<string>workout-processing</string>
+	</array>
+</dict>
+</plist>

@@ -32,7 +32,8 @@ public enum CueResponse: String, Sendable, Codable, CaseIterable {
     case dismissed
 }
 
-/// The runner's answer after the race, per cue.
+/// The runner's answer after the race, for one cue or the whole run:
+/// too much, just right, or too little ("missed something").
 public enum CueRating: String, Sendable, Codable, CaseIterable {
     case tooMuch, justRight, tooLittle
 }
@@ -241,14 +242,20 @@ public struct CueLog: Sendable, Equatable, Codable {
         public var display: DisplaySetting
         /// Run time the runner crossed the line, once known.
         public var finishTime: TimeInterval?
+        /// The runner's answer to "how was the display?" for the whole run
+        /// (too much / just right / missed something), once asked. Optional in
+        /// the file, so logs saved before it existed still load.
+        public var rating: CueRating?
 
         public init(name: String = "", targetTime: TimeInterval, distance: Double,
-                    display: DisplaySetting = .balanced, finishTime: TimeInterval? = nil) {
+                    display: DisplaySetting = .balanced, finishTime: TimeInterval? = nil,
+                    rating: CueRating? = nil) {
             self.name = name
             self.targetTime = targetTime
             self.distance = distance
             self.display = display
             self.finishTime = finishTime
+            self.rating = rating
         }
     }
 
@@ -274,6 +281,11 @@ public struct CueLog: Sendable, Equatable, Codable {
         guard let i = events.firstIndex(where: { $0.cue.id == id && $0.appeared }) else { return false }
         events[i].rating = rating
         return true
+    }
+
+    /// The runner's rating for the whole run (the post-race question); nil clears it.
+    public mutating func rate(_ rating: CueRating?) {
+        header.rating = rating
     }
 
     // MARK: JSON lines

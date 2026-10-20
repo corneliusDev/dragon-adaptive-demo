@@ -408,6 +408,24 @@ final class CueLogTests: XCTestCase {
         XCTAssertNotNil(loaded.appearances.first { $0.cue.key == .paceGap }?.outcome)
     }
 
+    /// The post-race question is about the whole run: it goes in the header,
+    /// round-trips, and a log saved before the field existed still loads.
+    func testRunRatingIsSavedInTheHeaderAndOldLogsStillLoad() throws {
+        var log = CueLog(header: CueLog.Header(name: "5K", targetTime: 1_500, distance: 5_000))
+        XCTAssertNil(log.header.rating)
+        log.rate(.tooLittle)
+        XCTAssertEqual(log.header.rating, .tooLittle)
+        let loaded = try CueLog(jsonLines: log.jsonLines())
+        XCTAssertEqual(loaded.header.rating, .tooLittle)
+        log.rate(nil)
+        XCTAssertNil(try CueLog(jsonLines: log.jsonLines()).header.rating)
+
+        let old = #"{"display":"balanced","distance":5000,"name":"old","targetTime":1500,"version":1}"#
+        let fromOld = try CueLog(jsonLines: Data((old + "\n").utf8))
+        XCTAssertEqual(fromOld.header.name, "old")
+        XCTAssertNil(fromOld.header.rating)
+    }
+
     func testEveryReasonAndCueTextRoundTrips() throws {
         let content = CueContent(heading: .marker(3, .kilometers), main: .phrase([.gap(-31), .pace(0.3, .miles)]),
                                  subtitle: [.duration(6_300), .distance(321.9), .label("VS PLAN")], tag: "SPLIT",

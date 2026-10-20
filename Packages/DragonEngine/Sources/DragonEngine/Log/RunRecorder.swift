@@ -10,8 +10,9 @@ import Foundation
 public final class RunRecorder {
     public private(set) var recording: RunRecording
 
-    public init(name: String = "", plan: RunPlan? = nil) {
-        recording = RunRecording(name: name, plan: plan)
+    /// `unit` / `display`: the engine settings, noted for replays.
+    public init(name: String = "", plan: RunPlan? = nil, unit: DistanceUnit? = nil, display: DisplaySetting? = nil) {
+        recording = RunRecording(name: name, plan: plan, unit: unit, display: display)
     }
 
     // MARK: Direct
@@ -35,6 +36,13 @@ public final class RunRecorder {
         case .vitals(let s): record(s)
         case .attention(let s): record(s.event, at: s.t)
         }
+    }
+
+    /// Notes the update grid a RunPacer ran the engine on (every `step`
+    /// seconds of run time through `endedAt`), so a replay can repeat it.
+    public func noteUpdates(step: TimeInterval, through endedAt: TimeInterval) {
+        recording.updateStep = step
+        recording.endedAt = endedAt
     }
 
     // MARK: Capturing sources

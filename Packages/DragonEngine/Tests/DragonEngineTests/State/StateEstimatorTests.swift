@@ -236,3 +236,26 @@ final class StateEstimatorTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(VitalsSample.self, from: JSONEncoder().encode(phone)), phone)
     }
 }
+
+/// The iPhone barometer's altitude gives the grade when there's no course.
+final class BarometerGradeTests: XCTestCase {
+    func testBarometerGradeBeatsFlatGPSAltitudeWithoutACourse() {
+        let plan = RunPlan(distanceMeters: 5_000, targetTime: 1_500)
+        var withBaro = StateEstimator(plan: plan)
+        var gpsOnly = StateEstimator(plan: plan)
+        let speed = 3.5
+        for i in 0...200 {
+            let t = TimeInterval(i)
+            let d = speed * t
+            // A 5% climb the barometer sees; GPS altitude says flat.
+            let baro = VitalsSample(timestamp: t, heartRate: nil, motion: nil, altitude: 0.05 * d, source: .phone)
+            let fix = LocationSample(t: t, latitude: d / 111_195, longitude: 0, horizontalAccuracy: 5,
+                                     speed: speed, altitude: 100)
+            withBaro.ingest(baro)
+            withBaro.ingest(fix)
+            gpsOnly.ingest(fix)
+        }
+        XCTAssertEqual(withBaro.state(at: 200).grade ?? 0, 0.05, accuracy: 0.005)
+        XCTAssertEqual(gpsOnly.state(at: 200).grade ?? 1, 0, accuracy: 0.005)
+    }
+}

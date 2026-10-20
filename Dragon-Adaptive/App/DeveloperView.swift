@@ -1,9 +1,27 @@
-//  ContentView.swift
+//  DeveloperView.swift
+//  The Developer menu (the gear on the home screen): what used to be the
+//  app's main screen. The legacy cycling / SOF scenario demos, the motion
+//  slider and source (SLIDER / WATCH / RACE), LOOK / WAVE, the synthetic race
+//  profile picker with 1x / 10x, the DISPLAY setting, the state overlay, the
+//  cue log, course debug and the screen gallery, and the recordings of real
+//  runs to replay through the live run screen, and the Watch link (where a
+//  real run's heart rate comes from, the link's state, the latest messages
+//  from the Watch, and start / end of the Watch workout). Same HUDController
+//  as the main flow, so the glasses connection is shared.
 import SwiftUI
 import DragonEngine
 
-struct ContentView: View {
-    @StateObject private var hud = HUDController()
+struct DeveloperView: View {
+    @ObservedObject var hud: HUDController
+    /// Past runs with a recording (phone-sensor runs), newest first.
+    var recordings: [RunRecord] = []
+    /// Replay one through the live run screen.
+    var onReplay: (RunRecord) -> Void = { _ in }
+    /// Where a real run's heart rate comes from; nil hides the picker.
+    var heartSource: HeartSourcePreference?
+    var watch: WatchLink = .shared
+    @State private var heart: HeartSource = .none
+    @Environment(\.dismiss) private var dismiss
     @State private var showCourseDebug = false
     @State private var showGallery = false
     private let amber = Color(red: 1, green: 0.54, blue: 0.24)
@@ -15,12 +33,14 @@ struct ContentView: View {
             VStack(spacing: 18) {
                 header
                 ConnectBar(hud: hud)
+                watchLink
                 MirrorView(frame: hud.frame).padding(14)
                     .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.10)))
                 motionControl
                 scenarioControls
                 lookButton
                 telemetry
+                recordingList
                 Text("The engine decides what to surface and what to hide from motion + attention + context. Faster motion → fewer elements, bigger glyphs. Safety-critical context surfaces unprompted.")
                     .font(.system(size: 12)).foregroundColor(.gray).padding(.horizontal, 4)
                 #if DEBUG
@@ -59,13 +79,90 @@ struct ContentView: View {
 
     private var header: some View {
         HStack {
+            Button("DONE") { dismiss() }
+                .font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(phos)
+                .accessibilityIdentifier("developerDone")
             Text("DRAGON").font(.system(size: 13, weight: .bold, design: .monospaced))
                 .padding(.horizontal, 9).padding(.vertical, 5)
                 .background(RoundedRectangle(cornerRadius: 4).stroke(Color(white: 0.25)))
-            Text("ADAPTIVE HUD").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+            Text("DEVELOPER").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
             Spacer()
             Circle().fill(hud.connection.isConnected ? phos : Color(white: 0.3)).frame(width: 8, height: 8)
             Text(hud.connection.label).font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+        }
+    }
+
+    /// The Watch: heart source for real runs, link state, recent messages.
+    private var watchLink: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("WATCH LINK").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                Spacer()
+                Circle().fill(watch.isReachable ? phos : Color(white: 0.3)).frame(width: 8, height: 8)
+                Text(watch.statusText.uppercased()).font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                    .accessibilityIdentifier("watchLinkStatus")
+            }
+            if let heartSource {
+                HStack(spacing: 10) {
+                    Text("HEART").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                    ForEach(HeartSource.allCases, id: \.self) { source in
+                        Button(source.title.uppercased()) { heart = source; heartSource.source = source }
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(heart == source ? phos : .gray)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(heart == source ? Color(white: 0.14) : .clear))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
+                            .accessibilityIdentifier("devHeart.\(source.rawValue)")
+                    }
+                }
+                .onAppear { heart = heartSource.source }
+            }
+            HStack(spacing: 18) {
+                Button("START WATCH WORKOUT") { watch.startWorkout { _ in } }
+                Button("END") { watch.endWorkout() }
+            }
+            .font(.system(size: 11, design: .monospaced)).foregroundColor(phos)
+            if let event = watch.lastEvent {
+                Text(event).font(.system(size: 11)).foregroundColor(Color(white: 0.5))
+            }
+            Text("\(watch.received) message\(watch.received == 1 ? "" : "s") from the Watch")
+                .font(.system(size: 11, design: .monospaced)).foregroundColor(.gray)
+                .accessibilityIdentifier("watchReceivedCount")
+            ForEach(watch.receipts.prefix(8)) { r in
+                HStack {
+                    Text(r.text).foregroundColor(.white)
+                    Spacer()
+                    Text("\(r.route.rawValue) · \(r.at.formatted(date: .omitted, time: .standard))").foregroundColor(.gray)
+                }
+                .font(.system(size: 10, design: .monospaced))
+            }
+        }
+    }
+
+    /// Real runs' recordings: tap one to replay it (its cues are decided again, identically).
+    private var recordingList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("RECORDINGS (REAL RUNS)").font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+            if recordings.isEmpty {
+                Text("None yet. Run with Phone sensors and END the run to record one.")
+                    .font(.system(size: 11)).foregroundColor(Color(white: 0.4))
+            }
+            ForEach(recordings) { record in
+                Button { onReplay(record) } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(record.plan.name).font(.system(size: 12, design: .monospaced)).foregroundColor(.white)
+                            Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.resultText)")
+                                .font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
+                        }
+                        Spacer()
+                        Text("REPLAY").font(.system(size: 11, design: .monospaced)).foregroundColor(phos)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 7).stroke(Color(white: 0.2)))
+                }
+                .accessibilityIdentifier("replay.\(record.plan.name)")
+            }
         }
     }
 
@@ -242,4 +339,8 @@ struct ContentView: View {
             Text(v).font(.system(size: 12, design: .monospaced)).foregroundColor(c)
         }.padding(.horizontal, 14).padding(.vertical, 11)
     }
+}
+
+#Preview("Developer menu") {
+    DeveloperView(hud: HUDController.shared).preferredColorScheme(.dark)
 }

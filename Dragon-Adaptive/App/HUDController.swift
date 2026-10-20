@@ -36,11 +36,8 @@ enum VitalsMode {
 final class HUDController: ObservableObject {
     @Published var connection: ConnectionState = .idle
     @Published var frame = HUDFrame()
-    @Published var motion: Double = 0 {
-        didSet {
-            motionSource.manualValue = motion
-        }
-    }
+    /// The motion slider (0–100): the legacy demos' motion input.
+    @Published var motion: Double = 0
     @Published var running = false
     @Published var scenarioKey = "tri"
     @Published var flywheel = 0
@@ -70,6 +67,12 @@ final class HUDController: ObservableObject {
     /// A screen from the gallery held on the mirror and the glasses in place of
     /// the live HUD; nil = live.
     @Published private(set) var galleryFrame: HUDFrame?
+    /// A run from the main flow (LiveRunModel) drawing the glasses in place of
+    /// this controller's own pipelines; nil = the controller's own.
+    @Published private(set) var runFrame: HUDFrame?
+    /// Every glance or held look (glasses gesture or the LOOK button), for the
+    /// main flow's live run.
+    var onAttention: ((AttentionEvent) -> Void)?
     /// The race's cue log so far.
     @Published private(set) var raceLog: CueLog?
     /// Where the race's cue log was last saved; nil until it has been.
@@ -84,7 +87,6 @@ final class HUDController: ObservableObject {
     private let engine = AdaptiveEngine(scenario: Scenarios.cyclingTri)
     private let session = GlassesSession()
     private let sim = SimulatedAttentionSource()
-    private let motionSource = MotionSource()
     private let synthetic = SyntheticVitalsSource()
     private let race = SyntheticRaceSource()
 
@@ -131,6 +133,7 @@ final class HUDController: ObservableObject {
             guard let self = self else { return }
             self.engine.handle(event, at: self.now)
             self.receiveRaceAttention(event)
+            self.onAttention?(event)
             self.backend?.invalidate()
         }
         sim.start()
@@ -183,6 +186,7 @@ final class HUDController: ObservableObject {
                 guard let self = self else { return }
                 self.engine.handle(event, at: self.now)
                 self.receiveRaceAttention(event)
+                self.onAttention?(event)
                 self.backend?.invalidate()
             }
             gesture.start()
@@ -203,7 +207,6 @@ final class HUDController: ObservableObject {
             }
         }
 
-        motionSource.start()
         startLoop()
     }
 
@@ -212,7 +215,6 @@ final class HUDController: ObservableObject {
         timer?.invalidate()
         synthetic.stop()
         race.stop()
-        motionSource.stop()
         gesture?.stop()
         session.disconnect()
     }
@@ -361,6 +363,16 @@ final class HUDController: ObservableObject {
 
     var glassesConnected: Bool { backend != nil }
 
+    // MARK: - Main-flow run
+
+    /// Shows a live run's frame on the mirror and the glasses; nil hands the
+    /// display back to this controller's own pipelines.
+    func showRunFrame(_ frame: HUDFrame?) {
+        runFrame = frame
+        backend?.invalidate()
+        pushImmediateFrame()
+    }
+
     /// Back to the measured effort for the budget.
     func useMeasuredEffort() {
         effortOverride = nil
@@ -486,7 +498,7 @@ final class HUDController: ObservableObject {
     }
 
     private func step(dt: Double) {
-        engine.motion = motionSource.value
+        engine.motion = motion
         engine.measuredHeartRate = freshHeartRate
 
         // The legacy engine keeps ticking (attention, band labels) either way.
@@ -523,7 +535,7 @@ final class HUDController: ObservableObject {
         } else {
             nextFrame = legacyFrame
         }
-        let shownFrame = galleryFrame ?? nextFrame
+        let shownFrame = galleryFrame ?? runFrame ?? nextFrame
         let cue = usesRunEngine ? runEngine.current : nil
         let cueState = runEngine.state
         let log = usesRunEngine && raceStarted ? runEngine.log : nil

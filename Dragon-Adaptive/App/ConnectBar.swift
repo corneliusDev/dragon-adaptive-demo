@@ -1,4 +1,4 @@
-//  ConnectBar.swift  — small connect/disconnect control used by ContentView.
+//  ConnectBar.swift  — small connect/disconnect control used by the Developer menu.
 import SwiftUI
 struct ConnectBar: View {
     @ObservedObject var hud: HUDController

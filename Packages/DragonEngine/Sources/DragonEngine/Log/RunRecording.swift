@@ -40,17 +40,35 @@ public struct RunRecording: Codable, Equatable, Sendable {
     public var locations: [LocationSample]
     public var vitals: [VitalsSample]
     public var attention: [AttentionSample]
+    /// For a recording made by a RunPacer (a real run): the engine was
+    /// updated every `updateStep` seconds of run time, from 0 through
+    /// `endedAt`. RunEngine.replaying(_:) repeats exactly that. nil for
+    /// recordings made any other way (synthetic, older files).
+    public var updateStep: TimeInterval?
+    public var endedAt: TimeInterval?
+    /// The engine settings the run had (with `name`), so a replay can set
+    /// the engine up the same way from the file alone; nil when not noted.
+    public var unit: DistanceUnit?
+    public var display: DisplaySetting?
 
     public init(name: String = "",
                 plan: RunPlan? = nil,
                 locations: [LocationSample] = [],
                 vitals: [VitalsSample] = [],
-                attention: [AttentionSample] = []) {
+                attention: [AttentionSample] = [],
+                updateStep: TimeInterval? = nil,
+                endedAt: TimeInterval? = nil,
+                unit: DistanceUnit? = nil,
+                display: DisplaySetting? = nil) {
         self.name = name
         self.plan = plan
         self.locations = locations
         self.vitals = vitals
         self.attention = attention
+        self.updateStep = updateStep
+        self.endedAt = endedAt
+        self.unit = unit
+        self.display = display
     }
 
     /// Run time of the last input, 0 when empty.
